@@ -1,0 +1,15 @@
+{
+  "context": "ChartPanel",
+  "bindings": {
+    "ctrl-plus": "stock_trading::ZoomIn",
+    "ctrl-minus": "stock_trading::ZoomOut",
+    "ctrl-0": "stock_trading::ResetZoom",
+    "left": "stock_trading::PanLeft",
+    "right": "stock_trading::PanRight",
+    "v": "stock_trading::ToggleVolume",
+    "i": "stock_trading::ToggleIndicators",
+    "t": "stock_trading::CycleTimeFrame",
+    "f11": "stock_trading::ToggleFullScreen",
+    "f5": "stock_trading::RefreshMarketData"
+  }
+}

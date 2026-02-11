@@ -1,0 +1,12 @@
+{
+  "context": "WatchlistPanel",
+  "bindings": {
+    "f5": "stock_trading::RefreshMarketData",
+    "ctrl-n": "stock_trading::FocusAddStockInput",
+    "ctrl-shift-e": "stock_trading::ExportWatchlist",
+    "ctrl-shift-i": "stock_trading::ImportWatchlist",
+    "ctrl-shift-x": "stock_trading::ClearWatchlist",
+    "delete": ["stock_trading::RemoveStockFromWatchlist", { "index": 0 }],
+    "enter": ["stock_trading::SelectStock", { "index": 0 }]
+  }
+}

@@ -428,10 +428,10 @@ pub enum TradeType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TimeInForce {
     Day,        // Good for day
-    GTC,        // Good till cancelled
-    IOC,        // Immediate or cancel
-    FOK,        // Fill or kill
-    GTD(SystemTime), // Good till date
+    Gtc,        // Good till cancelled
+    Ioc,        // Immediate or cancel
+    Fok,        // Fill or kill
+    Gtd(SystemTime), // Good till date
 }
 
 /// Order type enumeration
@@ -508,10 +508,10 @@ impl Order {
             return Err(anyhow::anyhow!("Limit orders must have a price"));
         }
         
-        if let Some(p) = price {
-            if p <= 0.0 {
-                return Err(anyhow::anyhow!("Price must be positive"));
-            }
+        if let Some(p) = price
+            && p <= 0.0
+        {
+            return Err(anyhow::anyhow!("Price must be positive"));
         }
         
         let now = SystemTime::now();
@@ -623,7 +623,7 @@ impl Candle {
 }
 
 /// Time frame enumeration for chart data
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum TimeFrame {
     OneMinute,
     FiveMinutes,
@@ -638,7 +638,7 @@ pub enum TimeFrame {
 
 impl TimeFrame {
     /// Convert timeframe to seconds
-    pub fn to_seconds(&self) -> u64 {
+    pub fn to_seconds(self) -> u64 {
         match self {
             TimeFrame::OneMinute => 60,
             TimeFrame::FiveMinutes => 300,

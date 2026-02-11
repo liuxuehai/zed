@@ -75,7 +75,8 @@ fn main() {
         );
         let http = ReqwestClient::user_agent(&user_agent)
             .expect("could not start HTTP client");
-        cx.set_http_client(Arc::new(http));
+        let http_arc = Arc::new(http);
+        cx.set_http_client(http_arc.clone());
 
         <dyn Fs>::set_global(fs.clone(), cx);
 
@@ -105,6 +106,15 @@ fn main() {
         
         // Initialize title bar after call system
         title_bar::init(cx);
+        
+        // Initialize stock trading system with proper error handling (.rules compliance)
+        // Use the HTTP client for market data and WebSocket connections
+        if let Err(error) = stock_trading::init(http_arc.clone(), cx) {
+            log::error!("Failed to initialize stock trading system: {}", error);
+            // Error logged above, no need for additional handling
+        } else {
+            log::info!("Stock trading system initialized successfully");
+        }
 
         let app_state = Arc::new(AppState {
             languages,
@@ -143,6 +153,9 @@ async fn create_empty_workspace(app_state: Arc<AppState>, cx: &mut AsyncApp) -> 
             app_state,
             cx,
             |workspace, window, cx| {
+                // Register stock trading demo panel
+                stock_trading::StockTradingDemoPanel::register(workspace, window, cx);
+                
                 // Create an empty workspace with Zed's full UI framework
                 // This will show the title bar, panels, and workspace layout
                 let restore_on_startup = WorkspaceSettings::get_global(cx).restore_on_startup;

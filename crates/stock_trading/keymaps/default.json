@@ -1,0 +1,14 @@
+{
+  "context": "Workspace",
+  "bindings": {
+    "ctrl-shift-w": "stock_trading::ToggleWatchlistPanel",
+    "ctrl-shift-c": "stock_trading::ToggleChartPanel",
+    "ctrl-shift-i": "stock_trading::ToggleStockInfoPanel",
+    "ctrl-shift-o": "stock_trading::ToggleOrderPanel",
+    "ctrl-shift-b": "stock_trading::ToggleOrderBookPanel",
+    "ctrl-shift-r": "stock_trading::RefreshMarketData",
+    "ctrl-shift-s": "stock_trading::OpenTradingSettings",
+    "ctrl-shift-m": "stock_trading::ToggleMockData",
+    "ctrl-shift-t": "stock_trading::ToggleRealTimeUpdates"
+  }
+}

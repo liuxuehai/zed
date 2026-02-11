@@ -407,6 +407,7 @@ snippet_provider = { path = "crates/snippet_provider" }
 snippets_ui = { path = "crates/snippets_ui" }
 sqlez = { path = "crates/sqlez" }
 sqlez_macros = { path = "crates/sqlez_macros" }
+stock_trading = { path = "crates/stock_trading" }
 story = { path = "crates/story" }
 streaming_diff = { path = "crates/streaming_diff" }
 sum_tree = { path = "crates/sum_tree" }

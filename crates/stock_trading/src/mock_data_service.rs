@@ -45,11 +45,13 @@ pub struct MockDataService {
 #[derive(Debug, Clone)]
 struct MockStockData {
     symbol: String,
+    #[allow(dead_code)] // Reserved for future use in stock info display
     name: String,
     base_price: f64,
     current_price: f64,
     volume: u64,
     market_cap: u64,
+    #[allow(dead_code)] // Reserved for future use in sector filtering
     sector: String,
     last_update: SystemTime,
     price_history: Vec<f64>,
@@ -402,7 +404,7 @@ impl MockDataService {
     
     /// Set price volatility for simulation
     pub fn set_price_volatility(&mut self, volatility: f64) {
-        self.price_volatility = volatility.max(0.001).min(0.1); // Clamp between 0.1% and 10%
+        self.price_volatility = volatility.clamp(0.001, 0.1); // Clamp between 0.1% and 10%
         
         // Update volatility for all stocks
         for stock_data in self.stock_data.values_mut() {
@@ -690,7 +692,7 @@ impl MockWebSocketService {
     
     /// Set price volatility
     pub fn set_price_volatility(&mut self, volatility: f64) {
-        self.price_volatility = volatility.max(0.001).min(0.1);
+        self.price_volatility = volatility.clamp(0.001, 0.1);
     }
 }
 

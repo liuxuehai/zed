@@ -14,13 +14,24 @@ futures.workspace = true
 gpui.workspace = true
 http_client.workspace = true
 log.workspace = true
+paths.workspace = true
 reqwest_client.workspace = true
+schemars.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 settings.workspace = true
 ui.workspace = true
 util.workspace = true
 workspace.workspace = true
+dirs = "5.0"  # For config directory resolution
+
+# GPUI Component - CANNOT BE USED due to unresolvable tree-sitter conflict
+# gpui-component 0.5.1 requires tree-sitter ^0.25.4 (links to native lib)
+# Zed workspace requires tree-sitter ^0.26 (links to same native lib)
+# Cargo does not allow multiple versions of crates that link to the same native library
+# Even [patch.crates-io] cannot resolve this conflict
+# Solution: Use Zed's built-in ui crate components or wait for gpui-component update
+# gpui-component = { version = "0.5.1", default-features = false }
 
 # WebSocket dependencies
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
@@ -30,4 +41,5 @@ tokio = { version = "1.0", features = ["sync"] }  # For Arc, Mutex
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+settings = { workspace = true, features = ["test-support"] }
 tokio-test = "0.4"  # For WebSocket testing

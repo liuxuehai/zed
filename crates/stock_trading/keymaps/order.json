@@ -1,0 +1,11 @@
+{
+  "context": "OrderPanel",
+  "bindings": {
+    "ctrl-enter": "stock_trading::SubmitOrder",
+    "escape": "stock_trading::ClearOrderForm",
+    "ctrl-q": "stock_trading::FocusQuantityInput",
+    "ctrl-p": "stock_trading::FocusPriceInput",
+    "ctrl-t": "stock_trading::ToggleOrderType",
+    "ctrl-s": "stock_trading::ToggleOrderSide"
+  }
+}

@@ -49,6 +49,7 @@ release_channel.workspace = true
 reqwest_client.workspace = true
 session.workspace = true
 settings.workspace = true
+stock_trading.workspace = true
 theme.workspace = true
 title_bar.workspace = true
 ui.workspace = true

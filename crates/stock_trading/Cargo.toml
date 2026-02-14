@@ -37,7 +37,10 @@ dirs = "5.0"  # For config directory resolution
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 url = "2.5"
 rand = "0.8"  # For mock data generation
-tokio = { version = "1.0", features = ["sync"] }  # For Arc, Mutex
+tokio = { version = "1.0", features = ["sync", "rt-multi-thread", "macros", "time"] }  # For Arc, Mutex, and runtime
+
+# Longport SDK for real market data
+longport = "3.0.17"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

@@ -153,8 +153,11 @@ async fn create_empty_workspace(app_state: Arc<AppState>, cx: &mut AsyncApp) -> 
             app_state,
             cx,
             |workspace, window, cx| {
-                // Register stock trading demo panel
+                // Register stock trading panels
                 stock_trading::StockTradingDemoPanel::register(workspace, window, cx);
+                stock_trading::WatchlistPanel::register(workspace, window, cx);
+                stock_trading::ChartPanel::register(workspace, window, cx);
+                stock_trading::OrderPanel::register(workspace, window, cx);
                 
                 // Create an empty workspace with Zed's full UI framework
                 // This will show the title bar, panels, and workspace layout

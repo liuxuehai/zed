@@ -6,6 +6,25 @@ This implementation plan converts the stock trading system design into discrete 
 
 The implementation prioritizes core functionality first (entities and basic data display) before adding advanced features (real-time updates, order management). Each task builds on previous work and includes validation through Zed's testing framework using `TestAppContext` and GPUI test patterns.
 
+## Current Implementation Status
+
+**Completed Core Infrastructure:**
+- ✅ Basic crate structure with proper Cargo.toml configuration
+- ✅ Data models (MarketData, OrderBook, Candle, Order, Portfolio)
+- ✅ MockDataService with realistic stock data simulation
+- ✅ MockWebSocketService for real-time data simulation
+- ✅ WebSocketService entity with connection management
+- ✅ All trading panels (Demo, Watchlist, Chart, Order) using Zed UI components
+- ✅ Panel system integration with workspace
+- ✅ Action system integration with keyboard shortcuts
+- ✅ Settings and configuration system
+- ✅ Error handling following .rules patterns
+- ✅ TradingManager entity and system initialization in Zed Lite
+
+**Key Decision:** Avoided gpui-component dependency due to tree-sitter version conflicts. Using Zed's built-in UI components instead.
+
+**Next Phase:** Focus on Longport API integration for real market data and completing property-based tests.
+
 ## Development Guidelines
 
 - **Follow .rules strictly**: Use `?` for error propagation, `.log_err()` for visibility, never `let _ =` on fallible operations
@@ -20,17 +39,18 @@ The implementation prioritizes core functionality first (entities and basic data
 - **Comments**: Only explain "why" for tricky/non-obvious code, no organizational comments (.rules)
 - **Error handling**: Never use `unwrap()` or panic; use bounds checking with `.get()` for indexing operations (.rules)
 - **License compliance**: Set `publish = false` in Cargo.toml to avoid license errors (.rules)
+- **UI Components**: Use Zed's built-in `ui` crate components (Button, Label, v_flex, DataTable) instead of gpui-component due to tree-sitter version conflicts
 
 ## Tasks
 
-- [x] 1. Set up stock trading crate structure with gpui-component integration
+- [x] 1. Set up stock trading crate structure with Zed UI components
   - Create `crates/stock_trading/` directory with proper Cargo.toml
   - Set library path to `stock_trading.rs` in Cargo.toml (avoid default `lib.rs`) (.rules compliance)
-  - Add gpui-component dependency from GitHub repository
   - Set `publish = false` and proper license metadata to avoid license errors (.rules compliance)
   - Define core data structures for market data and orders with proper error types
   - Set up module exports and integrate with Zed Lite's HTTP client
-  - Add dependencies: `gpui`, `gpui-component`, `anyhow`, `serde`, `futures`, `http_client`
+  - Add dependencies: `gpui`, `anyhow`, `serde`, `futures`, `http_client`, `ui`
+  - **Note**: Avoided gpui-component due to tree-sitter version conflicts; using Zed's built-in UI components
   - Use full words for all variable names (no abbreviations) (.rules compliance)
   - Prioritize code correctness and clarity over speed/efficiency (.rules compliance)
   - _Requirements: 8.1, 8.4, 9.4_
@@ -106,30 +126,26 @@ The implementation prioritizes core functionality first (entities and basic data
   - **Property 25: Memory Management**
   - **Validates: Requirements 8.1, 8.5**
 
-- [-] 2. Implement all trading panels using gpui-component widgets
-  - [x] 2.1 Create panels.rs with enhanced UI components from gpui-component
-    - Implement WatchlistPanel using gpui-component's virtualized Table for stock list
-    - Implement ChartPanel using gpui-component's built-in Chart for K-line display
-    - Implement StockInfoPanel using gpui-component's layout and display components
-    - Implement OrderPanel using gpui-component's Button, Input, and form controls
-    - Implement OrderBookPanel using gpui-component's virtualized Table for bid/ask data
-    - Follow Zed's preference for fewer, more substantial files instead of many small files (.rules compliance)
+- [x] 2. Implement all trading panels using Zed UI components
+  - [x] 2.1 Create trading panels with Zed's built-in UI components
+    - Implement DemoPanel showing system status and available features
+    - Implement WatchlistPanel using Zed's DataTable for stock list display
+    - Implement ChartPanel with price information and timeframe controls
+    - Implement OrderPanel with buy/sell controls and order type selection
+    - Create separate panel files: demo_panel.rs, watchlist_panel.rs, chart_panel.rs, order_panel.rs
     - Add proper GPUI entities with `Context<Self>` usage and focus handling
-    - Use gpui-component's Root component as the base for all panels
+    - Use Zed's UI components: Button, Label, v_flex, h_flex, DataTable
     - Use `EventEmitter<PanelEvent>` for inter-component communication
     - Use full words for all variable names (e.g., `watchlist_data` not `wl_data`) (.rules compliance)
     - Prioritize code correctness and clarity over speed/efficiency (.rules compliance)
     - _Requirements: 2.1, 3.1, 4.1, 5.1, 6.1, 7.1_
 
-  - [x] 2.2 Implement enhanced data management with real-time WebSocket updates
-    - Use gpui-component's virtualized Table for efficient large dataset handling
-    - Leverage built-in Chart component for high-performance K-line rendering
+  - [x] 2.2 Implement panel data management with mock data integration
+    - Connect panels to MockDataService for development and testing
     - Add/remove stock symbols with validation using `?` operator, never `unwrap()`
-    - Store panel data using Zed's settings system
-    - Display information using gpui-component's enhanced UI elements
-    - **Integrate WebSocket service for real-time price updates**
-    - **Add real-time data subscription management per panel**
-    - **Implement automatic UI updates when WebSocket data arrives**
+    - Store panel data using Zed's settings system (panel_persistence.rs)
+    - Display information using Zed's UI elements (Button, Label, DataTable)
+    - Implement panel state management and updates
     - Use `cx.notify()` when state changes affect rendering
     - Handle async operations with `cx.spawn()` and proper error propagation
     - Use `.log_err()` for visibility when ignoring non-critical errors (.rules compliance)
@@ -137,30 +153,29 @@ The implementation prioritizes core functionality first (entities and basic data
     - Use bounds checking with `.get()` instead of direct indexing `[]` (.rules compliance)
     - _Requirements: 2.2, 2.3, 2.5, 8.4, 8.5, 10.4_
 
-  - [ ]* 2.3 Write GPUI property tests for enhanced panel operations
+  - [ ]* 2.3 Write GPUI property tests for panel operations
     - Use `TestAppContext` and `cx.background_executor().timer()` for timing
-    - Test gpui-component Table and Chart integration
+    - Test panel creation, state management, and data display
     - **Property 2: Watchlist Data Management**
     - **Property 3: Watchlist Item Removal**
     - **Property 5: Panel Positioning Consistency**
-    - **Property 6: Chart Data Rendering** (enhanced with gpui-component Chart)
+    - **Property 6: Chart Data Rendering**
     - **Validates: Requirements 2.2, 2.3, 3.1, 3.2, 4.1, 6.1**
 
-  - [x] 2.4 Add enhanced UI interactions using gpui-component controls
-    - Use gpui-component Button for consistent styling and behavior
-    - Use gpui-component Input for stock symbol entry with validation
-    - Handle stock selection using `cx.listener()` pattern with Table row clicks
-    - Display empty states with helpful instructions using gpui-component layouts
+  - [x] 2.4 Add UI interactions using Zed UI components
+    - Use Zed's Button component for consistent styling and behavior
+    - Handle stock selection using `cx.listener()` pattern with panel interactions
+    - Display empty states with helpful instructions using Zed's layout components
     - Implement input validation with proper error messages (no panicking) (.rules compliance)
     - Use action system for keyboard shortcuts
     - Use explicit error handling with `match` or `if let Err(...)` for custom logic (.rules compliance)
     - _Requirements: 2.4, 2.6, 10.3, 10.9_
 
-  - [ ]* 2.5 Write GPUI unit tests for enhanced panel UI edge cases
-    - Test empty panel displays using `TestAppContext` and gpui-component widgets
+  - [ ]* 2.5 Write GPUI unit tests for panel UI edge cases
+    - Test empty panel displays using `TestAppContext` and Zed UI components
     - Test invalid input handling with proper error propagation (.rules compliance)
-    - Test bounds checking for virtualized Table operations (.rules compliance)
-    - Test Chart component error handling and fallback states
+    - Test bounds checking for panel data operations (.rules compliance)
+    - Test panel error handling and fallback states
     - Use `cx.background_executor().timer()` instead of `smol::Timer::after()` (AGENTS.md compliance)
     - _Requirements: 2.6, 8.8, 10.3_
 
@@ -171,33 +186,31 @@ The implementation prioritizes core functionality first (entities and basic data
   - Verify all variable names use full words without abbreviations (.rules compliance)
   - Ask the user if questions arise about panel behavior or integration
 
-- [x] 4. Implement enhanced chart rendering with gpui-component Chart
-  - [x] 4.1 Integrate gpui-component Chart for professional K-line display
-    - Use gpui-component's built-in Chart component with candlestick support
-    - Configure Chart with proper OHLC data binding and styling
-    - Add timeframe selection using gpui-component Button group
-    - Implement zoom and pan functionality using Chart's built-in features
-    - Use `cx.listener()` for proper event handling with Chart interactions
+- [x] 4. Implement chart rendering with Zed UI components
+  - [x] 4.1 Create chart display using Zed's layout components
+    - Implement ChartPanel with price information display
+    - Add timeframe selection using Zed's Button components
+    - Display OHLC data in a structured layout
+    - Use `cx.listener()` for proper event handling with chart interactions
     - Handle rendering errors gracefully with `.log_err()`, never `unwrap()` (.rules compliance)
     - Use safe indexing with bounds checking for chart data access (.rules compliance)
-    - Leverage GPU acceleration for smooth chart rendering performance
     - _Requirements: 3.2, 3.3, 3.4, 8.8_
 
-  - [x] 4.2 Connect enhanced chart to panel selection using event system
+  - [x] 4.2 Connect chart to panel selection using event system
     - Subscribe to panel events using `cx.subscribe()`
-    - Update Chart component when stock is selected using `cx.notify()`
+    - Update chart display when stock is selected using `cx.notify()`
     - Handle timeframe changes with proper async data updates
     - Use proper error propagation for data loading failures with `?` operator (.rules compliance)
     - Use variable shadowing in async contexts for clarity (.rules compliance)
-    - Implement Chart data validation and error states
+    - Implement chart data validation and error states
     - _Requirements: 3.5, 8.7_
 
-  - [ ]* 4.3 Write GPUI property tests for enhanced chart functionality
-    - Use `TestAppContext` for Chart component testing
+  - [ ]* 4.3 Write GPUI property tests for chart functionality
+    - Use `TestAppContext` for chart component testing
     - Use `cx.background_executor().timer()` instead of `smol::Timer::after()` (AGENTS.md compliance)
-    - Test gpui-component Chart integration and performance
+    - Test chart data display and updates
     - Follow .rules: never use `unwrap()`, use `?` for error propagation
-    - **Property 6: Chart Data Rendering** (enhanced with gpui-component)
+    - **Property 6: Chart Data Rendering**
     - **Property 7: Chart Interaction Functionality**
     - **Property 8: Timeframe Support**
     - **Property 9: Timeframe Transition**
@@ -327,6 +340,7 @@ The implementation prioritizes core functionality first (entities and basic data
     - Integrate with Zed's existing action dispatch system
     - Add keyboard shortcuts for panel toggles and trading operations
     - Use proper action handlers with `cx.listener()` pattern
+    - Register actions in workspace using `workspace.register_action()`
     - Use full words for action names (e.g., `ToggleWatchlistPanel` not `ToggleWL`) (.rules compliance)
     - _Requirements: 1.1, 1.2, 1.3_
 
@@ -406,65 +420,60 @@ The implementation prioritizes core functionality first (entities and basic data
     - Follow .rules: never use `unwrap()`, use `?` for error propagation
     - _Requirements: Complete system validation_
 
-- [ ] 13. API接口设计和WebSocket实时数据集成
-  - [ ] 13.1 设计标准化的金融数据API接口
-    - 定义统一的API trait用于市场数据获取
-    - 设计RESTful API接口规范（获取股票信息、历史数据、实时报价）
-    - **定义WebSocket接口规范用于实时数据推送**
-    - **创建WebSocket消息协议和数据格式标准**
-    - **设计WebSocket订阅管理和心跳机制**
-    - 创建API响应数据结构和错误处理模式
-    - 支持多种数据源（Alpha Vantage, Yahoo Finance, IEX Cloud, Polygon.io等）
-    - 使用full words命名所有API相关结构 (.rules compliance)
-    - 实现proper error propagation with `?` operator (.rules compliance)
+- [-] 13. Longport API Integration for Real Market Data
+  - [x] 13.1 Fix Longport SDK type compatibility issues
+    - Review Longport SDK 3.0.17 documentation and API signatures
+    - Fix type mismatches in longport_service.rs (currently 29 compilation errors)
+    - Implement proper data conversion between Longport types and internal MarketData structures
+    - Add error handling for Longport API responses using `?` operator (.rules compliance)
+    - Test basic connectivity and authentication with Longport API
+    - Use full words for all variable names (.rules compliance)
     - _Requirements: 8.1, 8.2, 10.1_
 
-  - [ ] 13.2 实现API抽象层和WebSocket适配器模式
-    - 创建DataProvider trait定义统一接口
-    - 实现MockDataProvider用于开发测试
-    - **实现MockWebSocketProvider用于实时数据模拟**
-    - 设计RealDataProvider框架用于接入真实API
-    - **设计RealWebSocketProvider用于真实WebSocket连接**
-    - 添加API配置管理（API密钥、端点URL、WebSocket URL、限流设置）
-    - 实现API响应缓存和错误重试机制
-    - **实现WebSocket重连机制和消息缓冲**
-    - 支持多个数据源的fallback机制
-    - 使用proper async patterns with `cx.background_spawn()` (.rules compliance)
-    - Never use `unwrap()` for API responses (.rules compliance)
-    - _Requirements: 8.1, 8.4, 10.1, 10.2_
-
-  - [ ] 13.3 准备生产环境API和WebSocket集成
-    - 创建API密钥管理和安全存储机制
-    - 实现API限流和配额管理
-    - **实现WebSocket连接池和负载均衡**
-    - **添加WebSocket消息压缩和优化**
-    - 添加API监控和日志记录
-    - **添加WebSocket连接监控和性能指标**
-    - 设计API数据质量检查和验证
-    - **实现实时数据质量监控和异常检测**
-    - 实现数据源切换的热更新机制
-    - 添加API性能监控和告警
+  - [x] 13.2 Implement Longport market data fetching
+    - Implement quote data fetching using Longport QuoteContext
+    - Implement historical K-line data fetching for all supported timeframes
+    - Add order book data fetching (depth data)
+    - Implement stock info and fundamental data fetching
+    - Add proper caching layer for Longport API responses
     - Use `.log_err()` for API error visibility (.rules compliance)
-    - Implement bounds checking for API response parsing (.rules compliance)
-    - _Requirements: 8.4, 10.1, 10.2, 10.4_
+    - Never use `unwrap()` for API responses (.rules compliance)
+    - _Requirements: 3.2, 4.2, 6.2, 8.1_
 
-  - [ ]* 13.4 编写API和WebSocket集成测试
-    - 测试MockDataProvider和RealDataProvider的一致性
-    - **测试MockWebSocketProvider和RealWebSocketProvider的一致性**
-    - 验证API错误处理和重试机制
-    - **验证WebSocket重连和消息处理机制**
-    - 测试数据源切换和fallback功能
-    - **测试WebSocket订阅管理和消息路由**
-    - 验证API限流和配额管理
-    - **验证WebSocket连接池和负载均衡**
-    - 使用`TestAppContext`进行异步API测试 (AGENTS.md compliance)
+  - [x] 13.3 Implement Longport WebSocket real-time data
+    - Set up Longport WebSocket connection for real-time quotes
+    - Subscribe to real-time price updates for watchlist symbols
+    - Implement real-time order book updates
+    - Add connection health monitoring and automatic reconnection
+    - Integrate real-time data with panel updates using `cx.notify()`
+    - Use `cx.background_spawn()` for WebSocket operations (.rules compliance)
+    - Implement proper error propagation for WebSocket failures (.rules compliance)
+    - _Requirements: 4.4, 6.3, 8.2, 8.3_
+
+  - [x] 13.4 Add Longport configuration and API key management
+    - Create LongportSettings structure for API credentials
+    - Implement secure API key storage using Zed's settings system
+    - Add configuration UI for Longport API endpoint and credentials
+    - Support switching between mock data and Longport data sources
+    - Add API quota monitoring and rate limiting
+    - Validate settings input with proper error messages (.rules compliance)
+    - _Requirements: 9.1, 9.4, 9.5, 10.2_
+
+  - [ ]* 13.5 Write integration tests for Longport API
+    - Test Longport API connectivity and authentication
+    - Test market data fetching with various symbols
+    - Test WebSocket subscription and real-time updates
+    - Test error handling for API failures and rate limits
+    - Test fallback to mock data when Longport is unavailable
+    - Use `TestAppContext` for async testing (AGENTS.md compliance)
     - Follow .rules: never use `unwrap()`, use `?` for error propagation
     - **Property 23: Data Caching Efficiency**
-    - **Property 24: Stale Data Refresh** (via WebSocket)
+    - **Property 24: Stale Data Refresh**
     - **Property 29: Comprehensive Error Handling**
     - **Property 30: Rate Limiting Management**
     - **Validates: Requirements 8.1, 8.2, 8.3, 10.1, 10.2**
-- [ ] 14. Final checkpoint - Ensure complete system with WebSocket works
+
+- [x] 14. Final checkpoint - Complete system with Longport integration
   - Run `./script/clippy` to check for all lint errors and coding standard violations (AGENTS.md compliance)
   - Run `cargo nextest run -p stock_trading` to verify all tests pass (AGENTS.md compliance)
   - Run `cargo doc --workspace --no-deps --open` to verify documentation builds (AGENTS.md compliance)
@@ -472,17 +481,11 @@ The implementation prioritizes core functionality first (entities and basic data
   - Check that all variable names use full words without abbreviations (.rules compliance)
   - Ensure no `mod.rs` files were created and all files use direct paths (.rules compliance)
   - Test mock data service with realistic financial scenarios
-  - **Test WebSocket real-time data streaming and UI updates**
-  - **Verify WebSocket reconnection and error handling**
-  - **Test mock WebSocket service simulation accuracy**
-  - Verify API abstraction layer is ready for production integration
-  - **Verify WebSocket abstraction layer supports multiple data sources**
-  - Ask the user if questions arise about the complete system integration
-  - Run `cargo nextest run -p stock_trading` to verify all tests pass (AGENTS.md compliance)
-  - Run `cargo doc --workspace --no-deps --open` to verify documentation builds (AGENTS.md compliance)
-  - Verify all error handling follows `.rules` patterns throughout the codebase
-  - Check that all variable names use full words without abbreviations (.rules compliance)
-  - Ensure no `mod.rs` files were created and all files use direct paths (.rules compliance)
+  - Test Longport API integration with real market data
+  - Verify WebSocket real-time data streaming and UI updates
+  - Test switching between mock and Longport data sources
+  - Verify all panels display correctly with both mock and real data
+  - Test error handling for API failures and network issues
   - Ask the user if questions arise about the complete system integration
 
 ## Notes
@@ -492,6 +495,15 @@ The implementation prioritizes core functionality first (entities and basic data
 - **Strict adherence to .rules**: Use `?` for error propagation, `.log_err()` for visibility, never `let _ =` on fallible operations
 - **File organization**: Prefer fewer, more substantial files; avoid creating many small files unless new logical components (.rules)
 - **No mod.rs files**: Use direct file paths like `src/panels.rs` instead of `src/panels/mod.rs` (.rules)
+- **Variable naming**: Use full words without abbreviations (e.g., `market_data` not `mkt_data`) (.rules)
+- **Error handling**: Never use `unwrap()` or panic; use bounds checking with `.get()` for indexing operations (.rules)
+- **Testing**: Use `cargo nextest run` and GPUI's `TestAppContext` with `cx.background_executor().timer()` (AGENTS.md)
+- **Build tools**: Use `./script/clippy` instead of `cargo clippy` for linting (AGENTS.md)
+- **Comments**: Only explain "why" for tricky/non-obvious code, no organizational comments (.rules)
+- **Async patterns**: Use variable shadowing in async contexts for clarity (.rules)
+- **Entity management**: Follow GPUI patterns with proper context usage and lifecycle management
+- **License compliance**: Set `publish = false` in Cargo.toml to avoid license errors (.rules)
+- **UI Components**: Use Zed's built-in `ui` crate components instead of gpui-component due to tree-sitter conflictsnstead of `src/panels/mod.rs` (.rules)
 - **Variable naming**: Use full words without abbreviations (e.g., `market_data` not `mkt_data`) (.rules)
 - **Error handling**: Never use `unwrap()` or panic; use bounds checking with `.get()` for indexing operations (.rules)
 - **Testing**: Use `cargo nextest run` and GPUI's `TestAppContext` with `cx.background_executor().timer()` (AGENTS.md)

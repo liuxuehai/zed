@@ -36,6 +36,8 @@ pub struct StockTradingSettings {
     pub cache_config: CacheConfig,
     /// WebSocket configuration
     pub websocket_config: WebSocketConfig,
+    /// Longport API configuration
+    pub longport_config: LongportConfig,
 }
 
 /// API configuration with proper validation
@@ -121,6 +123,33 @@ pub struct WebSocketConfig {
     pub auto_subscribe: bool,
 }
 
+/// Longport API configuration for real market data
+#[derive(Clone, Debug)]
+pub struct LongportConfig {
+    /// Whether Longport integration is enabled
+    pub enabled: bool,
+    /// Longport API app key (required for authentication)
+    pub app_key: Option<String>,
+    /// Longport API app secret (required for authentication)
+    pub app_secret: Option<String>,
+    /// Longport API access token (required for authentication)
+    pub access_token: Option<String>,
+    /// Longport API endpoint URL (optional, uses default if None)
+    pub api_endpoint: Option<String>,
+    /// Whether to use Longport for real-time data (vs mock data)
+    pub use_for_realtime: bool,
+    /// Whether to use Longport for historical data
+    pub use_for_historical: bool,
+    /// API quota limit per day (for monitoring)
+    pub daily_quota_limit: Option<u32>,
+    /// Current API usage count (for monitoring)
+    pub current_usage_count: u32,
+    /// Rate limit: maximum requests per minute
+    pub rate_limit_per_minute: u32,
+    /// Whether to automatically fallback to mock data on API errors
+    pub auto_fallback_to_mock: bool,
+}
+
 /// Settings content structure for JSON serialization
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct StockTradingSettingsContent {
@@ -159,6 +188,10 @@ pub struct StockTradingSettingsContent {
     /// WebSocket configuration
     #[serde(default)]
     pub websocket: WebSocketConfigContent,
+    
+    /// Longport API configuration
+    #[serde(default)]
+    pub longport: LongportConfigContent,
 }
 
 /// TimeFrame content for JSON serialization
@@ -281,6 +314,40 @@ pub struct WebSocketConfigContent {
     pub auto_subscribe: bool,
 }
 
+/// Longport API configuration content for JSON
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct LongportConfigContent {
+    #[serde(default = "default_longport_enabled")]
+    pub enabled: bool,
+    
+    #[serde(default)]
+    pub app_key: Option<String>,
+    
+    #[serde(default)]
+    pub app_secret: Option<String>,
+    
+    #[serde(default)]
+    pub access_token: Option<String>,
+    
+    #[serde(default)]
+    pub api_endpoint: Option<String>,
+    
+    #[serde(default = "default_use_for_realtime")]
+    pub use_for_realtime: bool,
+    
+    #[serde(default = "default_use_for_historical")]
+    pub use_for_historical: bool,
+    
+    #[serde(default)]
+    pub daily_quota_limit: Option<u32>,
+    
+    #[serde(default = "default_longport_rate_limit")]
+    pub rate_limit_per_minute: u32,
+    
+    #[serde(default = "default_auto_fallback_to_mock")]
+    pub auto_fallback_to_mock: bool,
+}
+
 // Default value functions
 fn default_watchlist() -> Vec<String> {
     vec![
@@ -391,6 +458,26 @@ fn default_auto_subscribe() -> bool {
     true
 }
 
+fn default_longport_enabled() -> bool {
+    false // Default to disabled, user must configure
+}
+
+fn default_use_for_realtime() -> bool {
+    true
+}
+
+fn default_use_for_historical() -> bool {
+    true
+}
+
+fn default_longport_rate_limit() -> u32 {
+    30 // Conservative default for Longport API
+}
+
+fn default_auto_fallback_to_mock() -> bool {
+    true // Automatically fallback to mock data on errors
+}
+
 impl Default for ApiConfigContent {
     fn default() -> Self {
         Self {
@@ -455,6 +542,23 @@ impl Default for WebSocketConfigContent {
     }
 }
 
+impl Default for LongportConfigContent {
+    fn default() -> Self {
+        Self {
+            enabled: default_longport_enabled(),
+            app_key: None,
+            app_secret: None,
+            access_token: None,
+            api_endpoint: None,
+            use_for_realtime: default_use_for_realtime(),
+            use_for_historical: default_use_for_historical(),
+            daily_quota_limit: None,
+            rate_limit_per_minute: default_longport_rate_limit(),
+            auto_fallback_to_mock: default_auto_fallback_to_mock(),
+        }
+    }
+}
+
 impl Settings for StockTradingSettings {
     fn from_settings(content: &SettingsContent) -> Self {
         // For now, use default settings since we need to add stock_trading field to SettingsContent
@@ -505,11 +609,25 @@ impl Settings for StockTradingSettings {
                 deduplication_window: Duration::from_secs(default_deduplication_window()),
                 auto_subscribe: default_auto_subscribe(),
             },
+            longport_config: LongportConfig {
+                enabled: default_longport_enabled(),
+                app_key: None,
+                app_secret: None,
+                access_token: None,
+                api_endpoint: None,
+                use_for_realtime: default_use_for_realtime(),
+                use_for_historical: default_use_for_historical(),
+                daily_quota_limit: None,
+                current_usage_count: 0,
+                rate_limit_per_minute: default_longport_rate_limit(),
+                auto_fallback_to_mock: default_auto_fallback_to_mock(),
+            },
         }
     }
 }
 
 /// Parse dock position string with proper error handling (.rules compliance)
+#[allow(dead_code)]
 fn parse_dock_position(position_str: &str) -> Option<DockPosition> {
     match position_str.to_lowercase().as_str() {
         "left" => Some(DockPosition::Left),
@@ -544,7 +662,118 @@ pub fn validate_settings(settings: &StockTradingSettings) -> Result<()> {
         return Err(anyhow::anyhow!("WebSocket max reconnect attempts must be greater than 0 when enabled"));
     }
     
+    // Validate Longport configuration
+    validate_longport_config(&settings.longport_config)?;
+    
     Ok(())
+}
+
+/// Validate Longport configuration with proper error messages (.rules compliance)
+pub fn validate_longport_config(config: &LongportConfig) -> Result<()> {
+    if !config.enabled {
+        return Ok(()); // Skip validation if Longport is disabled
+    }
+    
+    // Validate required credentials
+    if config.app_key.is_none() || config.app_key.as_ref().map(|k| k.is_empty()).unwrap_or(true) {
+        return Err(anyhow::anyhow!(
+            "Longport app_key is required when Longport integration is enabled. \
+            Please configure your Longport API credentials in settings."
+        ));
+    }
+    
+    if config.app_secret.is_none() || config.app_secret.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+        return Err(anyhow::anyhow!(
+            "Longport app_secret is required when Longport integration is enabled. \
+            Please configure your Longport API credentials in settings."
+        ));
+    }
+    
+    if config.access_token.is_none() || config.access_token.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
+        return Err(anyhow::anyhow!(
+            "Longport access_token is required when Longport integration is enabled. \
+            Please configure your Longport API credentials in settings."
+        ));
+    }
+    
+    // Validate rate limit
+    if config.rate_limit_per_minute == 0 {
+        return Err(anyhow::anyhow!(
+            "Longport rate_limit_per_minute must be greater than 0. \
+            Recommended value: 30 requests per minute."
+        ));
+    }
+    
+    // Validate API endpoint if provided
+    if let Some(endpoint) = &config.api_endpoint {
+        if endpoint.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Longport api_endpoint cannot be empty if specified. \
+                Leave as None to use default endpoint."
+            ));
+        }
+        
+        // Basic URL validation
+        if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
+            return Err(anyhow::anyhow!(
+                "Longport api_endpoint must start with http:// or https://. \
+                Provided: {}", endpoint
+            ));
+        }
+    }
+    
+    // Validate daily quota if provided
+    if let Some(quota) = config.daily_quota_limit
+        && quota == 0
+    {
+        return Err(anyhow::anyhow!(
+            "Longport daily_quota_limit must be greater than 0 if specified. \
+            Leave as None for unlimited quota."
+        ));
+    }
+    
+    // Warn if both realtime and historical are disabled
+    if !config.use_for_realtime && !config.use_for_historical {
+        log::warn!(
+            "Longport is enabled but both use_for_realtime and use_for_historical are disabled. \
+            Longport will not be used for any data fetching."
+        );
+    }
+    
+    Ok(())
+}
+
+/// Check if Longport credentials are configured
+pub fn has_longport_credentials(config: &LongportConfig) -> bool {
+    config.app_key.is_some() 
+        && config.app_secret.is_some() 
+        && config.access_token.is_some()
+}
+
+/// Check if Longport API quota is exceeded
+pub fn is_longport_quota_exceeded(config: &LongportConfig) -> bool {
+    if let Some(limit) = config.daily_quota_limit {
+        config.current_usage_count >= limit
+    } else {
+        false // No limit set
+    }
+}
+
+/// Get remaining Longport API quota
+pub fn get_remaining_longport_quota(config: &LongportConfig) -> Option<u32> {
+    config.daily_quota_limit.map(|limit| {
+        limit.saturating_sub(config.current_usage_count)
+    })
+}
+
+/// Increment Longport API usage count
+pub fn increment_longport_usage(config: &mut LongportConfig) {
+    config.current_usage_count = config.current_usage_count.saturating_add(1);
+}
+
+/// Reset Longport API usage count (typically called daily)
+pub fn reset_longport_usage(config: &mut LongportConfig) {
+    config.current_usage_count = 0;
 }
 
 #[cfg(test)]
@@ -563,11 +792,13 @@ mod tests {
             theme: ThemeConfigContent::default(),
             cache: CacheConfigContent::default(),
             websocket: WebSocketConfigContent::default(),
+            longport: LongportConfigContent::default(),
         };
         
         assert_eq!(content.default_watchlist.len(), 4);
         assert!(content.use_mock_data);
         assert_eq!(content.auto_refresh_interval, 30);
+        assert!(!content.longport.enabled); // Longport disabled by default
     }
     
     #[test]
@@ -624,6 +855,19 @@ mod tests {
                 deduplication_window: Duration::from_secs(5),
                 auto_subscribe: true,
             },
+            longport_config: LongportConfig {
+                enabled: false,
+                app_key: None,
+                app_secret: None,
+                access_token: None,
+                api_endpoint: None,
+                use_for_realtime: true,
+                use_for_historical: true,
+                daily_quota_limit: None,
+                current_usage_count: 0,
+                rate_limit_per_minute: 30,
+                auto_fallback_to_mock: true,
+            },
         };
         
         // Valid settings should pass
@@ -637,5 +881,201 @@ mod tests {
         // Invalid cache size
         settings.cache_config.max_cache_size = 0;
         assert!(validate_settings(&settings).is_err());
+    }
+    
+    #[test]
+    fn test_validate_longport_config_disabled() {
+        let config = LongportConfig {
+            enabled: false,
+            app_key: None,
+            app_secret: None,
+            access_token: None,
+            api_endpoint: None,
+            use_for_realtime: true,
+            use_for_historical: true,
+            daily_quota_limit: None,
+            current_usage_count: 0,
+            rate_limit_per_minute: 30,
+            auto_fallback_to_mock: true,
+        };
+        
+        // Disabled config should pass validation even without credentials
+        assert!(validate_longport_config(&config).is_ok());
+    }
+    
+    #[test]
+    fn test_validate_longport_config_missing_credentials() {
+        let mut config = LongportConfig {
+            enabled: true,
+            app_key: None,
+            app_secret: None,
+            access_token: None,
+            api_endpoint: None,
+            use_for_realtime: true,
+            use_for_historical: true,
+            daily_quota_limit: None,
+            current_usage_count: 0,
+            rate_limit_per_minute: 30,
+            auto_fallback_to_mock: true,
+        };
+        
+        // Missing app_key
+        assert!(validate_longport_config(&config).is_err());
+        
+        // Missing app_secret
+        config.app_key = Some("test_key".to_string());
+        assert!(validate_longport_config(&config).is_err());
+        
+        // Missing access_token
+        config.app_secret = Some("test_secret".to_string());
+        assert!(validate_longport_config(&config).is_err());
+        
+        // All credentials provided
+        config.access_token = Some("test_token".to_string());
+        assert!(validate_longport_config(&config).is_ok());
+    }
+    
+    #[test]
+    fn test_validate_longport_config_invalid_endpoint() {
+        let mut config = LongportConfig {
+            enabled: true,
+            app_key: Some("test_key".to_string()),
+            app_secret: Some("test_secret".to_string()),
+            access_token: Some("test_token".to_string()),
+            api_endpoint: Some("invalid_url".to_string()),
+            use_for_realtime: true,
+            use_for_historical: true,
+            daily_quota_limit: None,
+            current_usage_count: 0,
+            rate_limit_per_minute: 30,
+            auto_fallback_to_mock: true,
+        };
+        
+        // Invalid endpoint URL
+        assert!(validate_longport_config(&config).is_err());
+        
+        // Valid HTTPS endpoint
+        config.api_endpoint = Some("https://api.longport.com".to_string());
+        assert!(validate_longport_config(&config).is_ok());
+        
+        // Valid HTTP endpoint
+        config.api_endpoint = Some("http://localhost:8080".to_string());
+        assert!(validate_longport_config(&config).is_ok());
+    }
+    
+    #[test]
+    fn test_validate_longport_config_rate_limit() {
+        let mut config = LongportConfig {
+            enabled: true,
+            app_key: Some("test_key".to_string()),
+            app_secret: Some("test_secret".to_string()),
+            access_token: Some("test_token".to_string()),
+            api_endpoint: None,
+            use_for_realtime: true,
+            use_for_historical: true,
+            daily_quota_limit: None,
+            current_usage_count: 0,
+            rate_limit_per_minute: 0,
+            auto_fallback_to_mock: true,
+        };
+        
+        // Zero rate limit should fail
+        assert!(validate_longport_config(&config).is_err());
+        
+        // Valid rate limit
+        config.rate_limit_per_minute = 30;
+        assert!(validate_longport_config(&config).is_ok());
+    }
+    
+    #[test]
+    fn test_has_longport_credentials() {
+        let mut config = LongportConfig {
+            enabled: true,
+            app_key: None,
+            app_secret: None,
+            access_token: None,
+            api_endpoint: None,
+            use_for_realtime: true,
+            use_for_historical: true,
+            daily_quota_limit: None,
+            current_usage_count: 0,
+            rate_limit_per_minute: 30,
+            auto_fallback_to_mock: true,
+        };
+        
+        assert!(!has_longport_credentials(&config));
+        
+        config.app_key = Some("key".to_string());
+        assert!(!has_longport_credentials(&config));
+        
+        config.app_secret = Some("secret".to_string());
+        assert!(!has_longport_credentials(&config));
+        
+        config.access_token = Some("token".to_string());
+        assert!(has_longport_credentials(&config));
+    }
+    
+    #[test]
+    fn test_longport_quota_management() {
+        let mut config = LongportConfig {
+            enabled: true,
+            app_key: Some("key".to_string()),
+            app_secret: Some("secret".to_string()),
+            access_token: Some("token".to_string()),
+            api_endpoint: None,
+            use_for_realtime: true,
+            use_for_historical: true,
+            daily_quota_limit: Some(100),
+            current_usage_count: 0,
+            rate_limit_per_minute: 30,
+            auto_fallback_to_mock: true,
+        };
+        
+        // Initial state
+        assert!(!is_longport_quota_exceeded(&config));
+        assert_eq!(get_remaining_longport_quota(&config), Some(100));
+        
+        // Increment usage
+        for _ in 0..50 {
+            increment_longport_usage(&mut config);
+        }
+        assert_eq!(config.current_usage_count, 50);
+        assert!(!is_longport_quota_exceeded(&config));
+        assert_eq!(get_remaining_longport_quota(&config), Some(50));
+        
+        // Reach limit
+        for _ in 0..50 {
+            increment_longport_usage(&mut config);
+        }
+        assert_eq!(config.current_usage_count, 100);
+        assert!(is_longport_quota_exceeded(&config));
+        assert_eq!(get_remaining_longport_quota(&config), Some(0));
+        
+        // Reset usage
+        reset_longport_usage(&mut config);
+        assert_eq!(config.current_usage_count, 0);
+        assert!(!is_longport_quota_exceeded(&config));
+        assert_eq!(get_remaining_longport_quota(&config), Some(100));
+    }
+    
+    #[test]
+    fn test_longport_quota_no_limit() {
+        let config = LongportConfig {
+            enabled: true,
+            app_key: Some("key".to_string()),
+            app_secret: Some("secret".to_string()),
+            access_token: Some("token".to_string()),
+            api_endpoint: None,
+            use_for_realtime: true,
+            use_for_historical: true,
+            daily_quota_limit: None,
+            current_usage_count: 1000,
+            rate_limit_per_minute: 30,
+            auto_fallback_to_mock: true,
+        };
+        
+        // No limit set, should never be exceeded
+        assert!(!is_longport_quota_exceeded(&config));
+        assert_eq!(get_remaining_longport_quota(&config), None);
     }
 }

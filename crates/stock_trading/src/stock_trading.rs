@@ -1,15 +1,14 @@
 use anyhow::Result;
 use gpui::{App, AppContext, Context, Entity, EventEmitter, px, Render, Subscription};
 use http_client::HttpClient;
-use paths;
 use settings::Settings;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use workspace;
 
 // Re-export core modules
 pub mod market_data;
+pub mod longport_service;
 pub mod websocket_service;
 pub mod mock_data_service;
 pub mod error_handling;
@@ -19,12 +18,16 @@ pub mod trading_settings;
 pub mod panel_persistence;
 pub mod panel_manager;
 pub mod demo_panel;
+pub mod watchlist_panel;
+pub mod chart_panel;
+pub mod order_panel;
 // pub mod panels;  // Disabled: requires gpui-component which conflicts with tree-sitter version
 
 #[cfg(test)]
 mod tests;
 
 pub use market_data::*;
+pub use longport_service::*;
 pub use websocket_service::*;
 pub use mock_data_service::*;
 pub use error_handling::*;
@@ -34,6 +37,9 @@ pub use trading_settings::*;
 pub use panel_persistence::*;
 pub use panel_manager::*;
 pub use demo_panel::*;
+pub use watchlist_panel::*;
+pub use chart_panel::*;
+pub use order_panel::*;
 // pub use panels::*;  // Disabled
 
 /// Initialize the stock trading system with Zed Lite integration
@@ -45,6 +51,30 @@ pub fn init(http_client: Arc<dyn HttpClient>, cx: &mut App) -> Result<()> {
     
     // Register all trading actions with Zed's action system
     register_trading_actions(cx);
+    
+    // Register panel toggle action handlers
+    cx.observe_new(|workspace: &mut workspace::Workspace, _, _| {
+        // Demo panel
+        workspace.register_action(|workspace, _: &ToggleStockTradingDemoPanel, window, cx| {
+            workspace.toggle_panel_focus::<StockTradingDemoPanel>(window, cx);
+        });
+        
+        // Watchlist panel
+        workspace.register_action(|workspace, _: &ToggleWatchlistPanel, window, cx| {
+            workspace.toggle_panel_focus::<WatchlistPanel>(window, cx);
+        });
+        
+        // Chart panel
+        workspace.register_action(|workspace, _: &ToggleChartPanel, window, cx| {
+            workspace.toggle_panel_focus::<ChartPanel>(window, cx);
+        });
+        
+        // Order panel
+        workspace.register_action(|workspace, _: &ToggleOrderPanel, window, cx| {
+            workspace.toggle_panel_focus::<OrderPanel>(window, cx);
+        });
+    })
+    .detach();
     
     // Create central TradingManager entity that coordinates all components
     // This entity will be stored globally for access from workspace
@@ -718,7 +748,7 @@ impl TradingManager {
     ) -> Result<Box<dyn std::any::Any>> {
         // Create panel entities based on panel_id
         // Panels will subscribe to TradingManager events for cross-panel communication
-        let weak_self = cx.entity().downgrade();
+        let _weak_self = cx.entity().downgrade();
         
         match panel_id {
             "watchlist" => {
@@ -758,7 +788,7 @@ impl TradingManager {
     pub fn register_panels_with_workspace(
         &mut self,
         workspace: &Entity<workspace::Workspace>,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Result<()> {
         // This will be implemented when we integrate with workspace
         // For now, just log that panels are ready to be registered

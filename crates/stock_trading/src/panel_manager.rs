@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use util::ResultExt;
 
 use crate::{
-    DockPosition, PanelPersistence, PanelState, TradingManager, StockTradingSettings,
+    DockPosition, PanelPersistence, PanelState, TradingManager,
 };
 
 /// Panel layout configuration with proportional sizing
@@ -164,6 +164,7 @@ pub struct PanelManager {
     /// Panel persistence manager
     persistence: PanelPersistence,
     /// Reference to trading manager
+    #[allow(dead_code)]
     trading_manager: WeakEntity<TradingManager>,
     /// Active subscriptions
     _subscriptions: Vec<Subscription>,
@@ -786,12 +787,11 @@ impl PanelManager {
             .collect();
         
         for key in tab_group_keys {
-            if let Some(panel_state) = self.persistence.get_panel_state(&key) {
-                if let Some(tab_group_data) = panel_state.custom_state.get("tab_group_data") {
-                    if let Ok(tab_group) = serde_json::from_value::<TabGroup>(tab_group_data.clone()) {
-                        self.tab_groups.insert(tab_group.group_id.clone(), tab_group);
-                    }
-                }
+            if let Some(panel_state) = self.persistence.get_panel_state(&key)
+                && let Some(tab_group_data) = panel_state.custom_state.get("tab_group_data")
+                && let Ok(tab_group) = serde_json::from_value::<TabGroup>(tab_group_data.clone())
+            {
+                self.tab_groups.insert(tab_group.group_id.clone(), tab_group);
             }
         }
         
@@ -827,6 +827,7 @@ mod tests {
     use super::*;
     use gpui::TestAppContext;
     use settings::Settings;
+    use crate::StockTradingSettings;
     
     #[test]
     fn test_panel_layout_validation() {

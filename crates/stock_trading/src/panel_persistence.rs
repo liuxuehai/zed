@@ -31,18 +31,10 @@ impl Default for PanelState {
 }
 
 /// Manages persistence of panel states across sessions
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PanelPersistence {
     /// Map of panel names to their states
     pub panel_states: HashMap<String, PanelState>,
-}
-
-impl Default for PanelPersistence {
-    fn default() -> Self {
-        Self {
-            panel_states: HashMap::new(),
-        }
-    }
 }
 
 impl PanelPersistence {

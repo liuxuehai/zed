@@ -85,7 +85,7 @@ impl Panel for StockTradingDemoPanel {
     }
 
     fn set_size(&mut self, size: Option<Pixels>, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.width = size.map(|p| f32::from(p));
+        self.width = size.map(f32::from);
     }
 
     fn icon(&self, _window: &Window, _cx: &App) -> Option<ui::IconName> {

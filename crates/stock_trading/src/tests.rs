@@ -369,6 +369,12 @@ async fn test_websocket_subscription_validation(_cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn test_gpui_component_integration(cx: &mut TestAppContext) {
+    // Initialize settings store for the test
+    cx.update(|cx| {
+        settings::init(cx);
+        StockTradingSettings::register(cx);
+    });
+    
     // Test TradingManager entity creation and basic functionality
     let http_client = reqwest_client::ReqwestClient::new();
     let trading_manager = cx.update(|cx| TradingManager::new(std::sync::Arc::new(http_client), cx));

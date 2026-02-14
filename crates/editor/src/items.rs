@@ -39,7 +39,6 @@ use std::{
     sync::Arc,
 };
 use text::{BufferId, BufferSnapshot, Selection};
-use theme::Theme;
 use ui::{IconDecorationKind, prelude::*};
 use util::{ResultExt, TryFutureExt, paths::PathExt};
 use workspace::{
@@ -47,7 +46,8 @@ use workspace::{
     invalid_item_view::InvalidItemView,
     item::{FollowableItem, Item, ItemBufferKind, ItemEvent, ProjectItem, SaveOptions},
     searchable::{
-        Direction, FilteredSearchRange, SearchEvent, SearchableItem, SearchableItemHandle,
+        Direction, FilteredSearchRange, SearchEvent, SearchToken, SearchableItem,
+        SearchableItemHandle,
     },
 };
 use workspace::{
@@ -978,9 +978,9 @@ impl Item for Editor {
     }
 
     // In a non-singleton case, the breadcrumbs are actually shown on sticky file headers of the multibuffer.
-    fn breadcrumbs(&self, variant: &Theme, cx: &App) -> Option<Vec<BreadcrumbText>> {
+    fn breadcrumbs(&self, cx: &App) -> Option<Vec<BreadcrumbText>> {
         if self.buffer.read(cx).is_singleton() {
-            self.breadcrumbs_inner(variant, cx)
+            self.breadcrumbs_inner(cx)
         } else {
             None
         }
@@ -1497,12 +1497,15 @@ impl Editor {
 impl SearchableItem for Editor {
     type Match = Range<Anchor>;
 
-    fn get_matches(&self, _window: &mut Window, _: &mut App) -> Vec<Range<Anchor>> {
-        self.background_highlights
-            .get(&HighlightKey::BufferSearchHighlights)
-            .map_or(Vec::new(), |(_color, ranges)| {
-                ranges.iter().cloned().collect()
-            })
+    fn get_matches(&self, _window: &mut Window, _: &mut App) -> (Vec<Range<Anchor>>, SearchToken) {
+        (
+            self.background_highlights
+                .get(&HighlightKey::BufferSearchHighlights)
+                .map_or(Vec::new(), |(_color, ranges)| {
+                    ranges.iter().cloned().collect()
+                }),
+            SearchToken::default(),
+        )
     }
 
     fn clear_matches(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -1518,6 +1521,7 @@ impl SearchableItem for Editor {
         &mut self,
         matches: &[Range<Anchor>],
         active_match_index: Option<usize>,
+        _token: SearchToken,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1631,6 +1635,7 @@ impl SearchableItem for Editor {
         &mut self,
         index: usize,
         matches: &[Range<Anchor>],
+        _token: SearchToken,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1649,6 +1654,7 @@ impl SearchableItem for Editor {
     fn select_matches(
         &mut self,
         matches: &[Self::Match],
+        _token: SearchToken,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1661,6 +1667,7 @@ impl SearchableItem for Editor {
         &mut self,
         identifier: &Self::Match,
         query: &SearchQuery,
+        _token: SearchToken,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1684,6 +1691,7 @@ impl SearchableItem for Editor {
         &mut self,
         matches: &mut dyn Iterator<Item = &Self::Match>,
         query: &SearchQuery,
+        _token: SearchToken,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1726,6 +1734,7 @@ impl SearchableItem for Editor {
         current_index: usize,
         direction: Direction,
         count: usize,
+        _token: SearchToken,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> usize {
@@ -1833,6 +1842,7 @@ impl SearchableItem for Editor {
         &mut self,
         direction: Direction,
         matches: &[Range<Anchor>],
+        _token: SearchToken,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<usize> {

@@ -838,6 +838,7 @@ pub enum TradingEvent {
 pub struct DataService {
     #[allow(dead_code)] // Reserved for future HTTP API integration
     http_client: Arc<dyn HttpClient>,
+    longport_service: Option<Entity<LongportService>>,
     websocket_service: Option<Entity<WebSocketService>>,
     mock_data_service: Option<Entity<MockDataService>>,
     error_handler: Option<Entity<NetworkErrorHandler>>,
@@ -880,8 +881,55 @@ impl DataService {
         cx.new(|cx| {
             let error_handler = NetworkErrorHandler::new(cx);
             
+            // Read use_mock_data from settings
+            let settings = StockTradingSettings::get_global(cx);
+            let use_mock_data = settings.use_mock_data;
+            
+            log::info!("DataService::new - use_mock_data from settings: {}", use_mock_data);
+            log::info!("DataService::new - longport enabled: {}", settings.longport_config.enabled);
+            
+            // Initialize LongportService if not using mock data and credentials are configured
+            let longport_service = if !use_mock_data && settings.longport_config.enabled {
+                log::info!("Attempting to initialize LongportService...");
+                
+                // Validate Longport configuration
+                match validate_longport_config(&settings.longport_config) {
+                    Ok(()) => {
+                        log::info!("Longport configuration validated successfully");
+                        
+                        // Safe to unwrap after validation
+                        let app_key = settings.longport_config.app_key.clone().unwrap_or_default();
+                        let app_secret = settings.longport_config.app_secret.clone().unwrap_or_default();
+                        let access_token = settings.longport_config.access_token.clone().unwrap_or_default();
+                        
+                        match LongportService::new_entity(app_key, app_secret, access_token, cx) {
+                            Ok(service) => {
+                                log::info!("✓ LongportService initialized successfully");
+                                Some(service)
+                            }
+                            Err(error) => {
+                                log::error!("✗ Failed to initialize LongportService: {}", error);
+                                None
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        log::error!("✗ Invalid Longport configuration: {}", error);
+                        None
+                    }
+                }
+            } else {
+                if !use_mock_data {
+                    log::warn!("Longport integration is disabled in settings. Using mock data instead.");
+                } else {
+                    log::info!("Using mock data as configured (use_mock_data=true)");
+                }
+                None
+            };
+            
             let mut service = Self {
                 http_client,
+                longport_service,
                 websocket_service: None,
                 mock_data_service: None,
                 error_handler: Some(error_handler),
@@ -889,7 +937,7 @@ impl DataService {
                 historical_cache: HashMap::new(),
                 order_book_cache: HashMap::new(),
                 cache_duration: Duration::from_secs(60), // 1 minute cache
-                use_mock_data: true, // Default to mock data for development
+                use_mock_data,
                 subscribed_symbols: std::collections::HashSet::new(),
                 auto_refresh_enabled: true,
                 refresh_interval: Duration::from_secs(30), // 30 second refresh
@@ -1001,13 +1049,127 @@ impl DataService {
         )))
     }
     
-    /// Fetch market data from live sources (HTTP fallback)
-    fn fetch_live_market_data(&mut self, _symbol: String, cx: &mut Context<Self>) -> gpui::Task<Result<MarketData>> {
-        // For now, return an error as we don't have live data integration yet
-        // In a real implementation, this would make HTTP requests to financial APIs
-        cx.spawn(async move |_this, _cx| {
-            Err(anyhow::anyhow!("Live data not implemented yet. Use mock data for development."))
-        })
+    /// Fetch market data from live sources (Longport API)
+    fn fetch_live_market_data(&mut self, symbol: String, cx: &mut Context<Self>) -> gpui::Task<Result<MarketData>> {
+        log::info!("fetch_live_market_data called for symbol: {}", symbol);
+        
+        if let Some(_longport_service) = self.longport_service.clone() {
+            log::info!("LongportService is available, fetching real data from Longport API");
+            
+            // Get Longport configuration from settings
+            let settings = StockTradingSettings::get_global(cx);
+            let longport_config = settings.longport_config.clone();
+            
+            log::info!("Longport config - enabled: {}, use_mock_data: {}", 
+                longport_config.enabled, settings.use_mock_data);
+            
+            // Spawn a background task to call the Longport API directly
+            cx.background_executor().spawn(async move {
+                log::info!("Background task started for symbol: {}", symbol);
+                
+                // Validate configuration
+                if !longport_config.enabled {
+                    log::warn!("Longport is not enabled in settings");
+                    return Err(anyhow::anyhow!("Longport is not enabled in settings"));
+                }
+                
+                let app_key = longport_config.app_key
+                    .ok_or_else(|| anyhow::anyhow!("Longport app_key not configured"))?;
+                let app_secret = longport_config.app_secret
+                    .ok_or_else(|| anyhow::anyhow!("Longport app_secret not configured"))?;
+                let access_token = longport_config.access_token
+                    .ok_or_else(|| anyhow::anyhow!("Longport access_token not configured"))?;
+                
+                log::info!("Creating Longport configuration for symbol: {}", symbol);
+                
+                // Create Longport configuration
+                let config = longport::Config::new(app_key, app_secret, access_token);
+                
+                log::info!("Creating Longport QuoteContext for symbol: {}", symbol);
+                
+                // Create quote context
+                let (quote_ctx, _) = longport::quote::QuoteContext::try_new(config.into()).await
+                    .map_err(|e| {
+                        log::error!("Failed to create Longport quote context: {}", e);
+                        anyhow::anyhow!("Failed to create Longport quote context: {}", e)
+                    })?;
+                
+                log::info!("Fetching quote from Longport for symbol: {}", symbol);
+                
+                // Get quote data
+                let quotes = quote_ctx.quote([symbol.as_str()]).await
+                    .map_err(|e| {
+                        log::error!("Failed to get quote from Longport: {}", e);
+                        anyhow::anyhow!("Failed to get quote from Longport: {}", e)
+                    })?;
+                
+                let quote = quotes.first()
+                    .ok_or_else(|| {
+                        log::error!("No quote data for symbol: {}", symbol);
+                        anyhow::anyhow!("No quote data for symbol: {}", symbol)
+                    })?;
+                
+                log::info!("Successfully received quote from Longport for {}: price={}", 
+                    symbol, quote.last_done);
+                
+                // Convert Longport quote to MarketData
+                let last_done = quote.last_done.to_string().parse::<f64>()
+                    .unwrap_or(0.0);
+                let prev_close = quote.prev_close.to_string().parse::<f64>()
+                    .unwrap_or(0.0);
+                let high = quote.high.to_string().parse::<f64>()
+                    .unwrap_or(0.0);
+                let low = quote.low.to_string().parse::<f64>()
+                    .unwrap_or(0.0);
+                
+                let volume = if quote.volume >= 0 {
+                    quote.volume as u64
+                } else {
+                    0
+                };
+                
+                let unix_timestamp = quote.timestamp.unix_timestamp();
+                let timestamp = if unix_timestamp >= 0 {
+                    SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(unix_timestamp as u64)
+                } else {
+                    SystemTime::now()
+                };
+                
+                let market_data = MarketData {
+                    symbol: quote.symbol.clone(),
+                    current_price: last_done,
+                    change: last_done - prev_close,
+                    change_percent: if prev_close > 0.0 {
+                        ((last_done - prev_close) / prev_close) * 100.0
+                    } else {
+                        0.0
+                    },
+                    volume,
+                    day_high: high,
+                    day_low: low,
+                    previous_close: prev_close,
+                    timestamp,
+                    market_status: MarketStatus::Open,
+                    market_cap: None,
+                    high_52w: None,
+                    low_52w: None,
+                    average_volume: None,
+                    bid: None,
+                    ask: None,
+                    bid_size: None,
+                    ask_size: None,
+                };
+                
+                log::info!("Successfully converted Longport data to MarketData for {}", symbol);
+                
+                Ok(market_data)
+            })
+        } else {
+            log::error!("LongportService not initialized!");
+            gpui::Task::ready(Err(anyhow::anyhow!(
+                "LongportService not initialized. Please check your Longport API credentials in settings."
+            )))
+        }
     }
     
     /// Cache market data with metadata

@@ -367,7 +367,7 @@ fn default_refresh_interval() -> u64 {
 }
 
 fn default_use_mock_data() -> bool {
-    true // Default to mock data for development
+    false // Use real Longport data by default
 }
 
 fn default_market_data_url() -> String {
@@ -561,68 +561,172 @@ impl Default for LongportConfigContent {
 
 impl Settings for StockTradingSettings {
     fn from_settings(content: &SettingsContent) -> Self {
-        // For now, use default settings since we need to add stock_trading field to SettingsContent
-        // This will be properly integrated when SettingsContent is extended
-        let _ = content; // Acknowledge unused parameter
+        // Extract stock_trading settings from SettingsContent
+        let stock_trading_content = content.stock_trading.as_ref();
         
         Self {
-            default_watchlist: default_watchlist(),
-            default_timeframe: TimeFrame::OneDay,
-            auto_refresh_interval: Duration::from_secs(default_refresh_interval()),
-            use_mock_data: default_use_mock_data(),
+            default_watchlist: stock_trading_content
+                .map(|s| s.default_watchlist.clone())
+                .unwrap_or_else(default_watchlist),
+            default_timeframe: stock_trading_content
+                .map(|s| parse_timeframe(s.default_timeframe.to_string()))
+                .unwrap_or(TimeFrame::OneDay),
+            auto_refresh_interval: Duration::from_secs(
+                stock_trading_content
+                    .map(|s| s.auto_refresh_interval)
+                    .unwrap_or_else(default_refresh_interval)
+            ),
+            use_mock_data: stock_trading_content
+                .map(|s| s.use_mock_data)
+                .unwrap_or_else(default_use_mock_data),
             api_config: ApiConfig {
-                market_data_url: default_market_data_url(),
-                trading_api_url: None,
-                websocket_url: None,
-                api_key: None,
-                request_timeout: Duration::from_secs(default_request_timeout()),
-                max_retry_attempts: default_max_retry_attempts(),
-                rate_limit_per_minute: default_rate_limit(),
+                market_data_url: stock_trading_content
+                    .and_then(|s| s.api.market_data_url.clone())
+                    .unwrap_or_else(default_market_data_url),
+                trading_api_url: stock_trading_content
+                    .and_then(|s| s.api.trading_api_url.clone()),
+                websocket_url: stock_trading_content
+                    .and_then(|s| s.api.websocket_url.clone()),
+                api_key: stock_trading_content
+                    .and_then(|s| s.api.api_key.clone()),
+                request_timeout: Duration::from_secs(
+                    stock_trading_content
+                        .map(|s| s.api.request_timeout)
+                        .unwrap_or_else(default_request_timeout)
+                ),
+                max_retry_attempts: stock_trading_content
+                    .map(|s| s.api.max_retry_attempts)
+                    .unwrap_or_else(default_max_retry_attempts),
+                rate_limit_per_minute: stock_trading_content
+                    .map(|s| s.api.rate_limit_per_minute)
+                    .unwrap_or_else(default_rate_limit),
             },
             panel_config: PanelConfig {
                 default_positions: HashMap::new(),
                 panel_sizes: HashMap::new(),
                 panel_visibility: HashMap::new(),
-                restore_on_startup: default_restore_on_startup(),
+                restore_on_startup: stock_trading_content
+                    .map(|s| s.panels.restore_on_startup)
+                    .unwrap_or_else(default_restore_on_startup),
             },
             theme_config: ThemeConfig {
-                positive_color: default_positive_color(),
-                negative_color: default_negative_color(),
-                neutral_color: default_neutral_color(),
-                chart_background: None,
-                grid_color: default_grid_color(),
-                use_theme_colors: default_use_theme_colors(),
+                positive_color: stock_trading_content
+                    .and_then(|s| s.theme.positive_color.clone())
+                    .unwrap_or_else(default_positive_color),
+                negative_color: stock_trading_content
+                    .and_then(|s| s.theme.negative_color.clone())
+                    .unwrap_or_else(default_negative_color),
+                neutral_color: stock_trading_content
+                    .and_then(|s| s.theme.neutral_color.clone())
+                    .unwrap_or_else(default_neutral_color),
+                chart_background: stock_trading_content
+                    .and_then(|s| s.theme.chart_background.clone()),
+                grid_color: stock_trading_content
+                    .and_then(|s| s.theme.grid_color.clone())
+                    .unwrap_or_else(default_grid_color),
+                use_theme_colors: stock_trading_content
+                    .map(|s| s.theme.use_theme_colors)
+                    .unwrap_or_else(default_use_theme_colors),
             },
             cache_config: CacheConfig {
-                market_data_cache_duration: Duration::from_secs(default_market_data_cache_duration()),
-                historical_data_cache_duration: Duration::from_secs(default_historical_data_cache_duration()),
-                order_book_cache_duration: Duration::from_secs(default_order_book_cache_duration()),
-                max_cache_size: default_max_cache_size(),
-                auto_cleanup_enabled: default_auto_cleanup_enabled(),
-                cleanup_interval: Duration::from_secs(default_cleanup_interval()),
+                market_data_cache_duration: Duration::from_secs(
+                    stock_trading_content
+                        .map(|s| s.cache.market_data_cache_duration)
+                        .unwrap_or_else(default_market_data_cache_duration)
+                ),
+                historical_data_cache_duration: Duration::from_secs(
+                    stock_trading_content
+                        .map(|s| s.cache.historical_data_cache_duration)
+                        .unwrap_or_else(default_historical_data_cache_duration)
+                ),
+                order_book_cache_duration: Duration::from_secs(
+                    stock_trading_content
+                        .map(|s| s.cache.order_book_cache_duration)
+                        .unwrap_or_else(default_order_book_cache_duration)
+                ),
+                max_cache_size: stock_trading_content
+                    .map(|s| s.cache.max_cache_size)
+                    .unwrap_or_else(default_max_cache_size),
+                auto_cleanup_enabled: stock_trading_content
+                    .map(|s| s.cache.auto_cleanup_enabled)
+                    .unwrap_or_else(default_auto_cleanup_enabled),
+                cleanup_interval: Duration::from_secs(
+                    stock_trading_content
+                        .map(|s| s.cache.cleanup_interval)
+                        .unwrap_or_else(default_cleanup_interval)
+                ),
             },
             websocket_config: WebSocketConfig {
-                enabled: default_websocket_enabled(),
-                max_reconnect_attempts: default_max_reconnect_attempts(),
-                reconnect_delay: Duration::from_secs(default_reconnect_delay()),
-                heartbeat_interval: Duration::from_secs(default_heartbeat_interval()),
-                deduplication_window: Duration::from_secs(default_deduplication_window()),
-                auto_subscribe: default_auto_subscribe(),
+                enabled: stock_trading_content
+                    .map(|s| s.websocket.enabled)
+                    .unwrap_or_else(default_websocket_enabled),
+                max_reconnect_attempts: stock_trading_content
+                    .map(|s| s.websocket.max_reconnect_attempts)
+                    .unwrap_or_else(default_max_reconnect_attempts),
+                reconnect_delay: Duration::from_secs(
+                    stock_trading_content
+                        .map(|s| s.websocket.reconnect_delay)
+                        .unwrap_or_else(default_reconnect_delay)
+                ),
+                heartbeat_interval: Duration::from_secs(
+                    stock_trading_content
+                        .map(|s| s.websocket.heartbeat_interval)
+                        .unwrap_or_else(default_heartbeat_interval)
+                ),
+                deduplication_window: Duration::from_secs(
+                    stock_trading_content
+                        .map(|s| s.websocket.deduplication_window)
+                        .unwrap_or_else(default_deduplication_window)
+                ),
+                auto_subscribe: stock_trading_content
+                    .map(|s| s.websocket.auto_subscribe)
+                    .unwrap_or_else(default_auto_subscribe),
             },
             longport_config: LongportConfig {
-                enabled: default_longport_enabled(),
-                app_key: None,
-                app_secret: None,
-                access_token: None,
-                api_endpoint: None,
-                use_for_realtime: default_use_for_realtime(),
-                use_for_historical: default_use_for_historical(),
-                daily_quota_limit: None,
+                enabled: stock_trading_content
+                    .map(|s| s.longport.enabled)
+                    .unwrap_or_else(default_longport_enabled),
+                app_key: stock_trading_content
+                    .and_then(|s| s.longport.app_key.clone()),
+                app_secret: stock_trading_content
+                    .and_then(|s| s.longport.app_secret.clone()),
+                access_token: stock_trading_content
+                    .and_then(|s| s.longport.access_token.clone()),
+                api_endpoint: stock_trading_content
+                    .and_then(|s| s.longport.api_endpoint.clone()),
+                use_for_realtime: stock_trading_content
+                    .map(|s| s.longport.use_for_realtime)
+                    .unwrap_or_else(default_use_for_realtime),
+                use_for_historical: stock_trading_content
+                    .map(|s| s.longport.use_for_historical)
+                    .unwrap_or_else(default_use_for_historical),
+                daily_quota_limit: stock_trading_content
+                    .and_then(|s| s.longport.daily_quota_limit),
                 current_usage_count: 0,
-                rate_limit_per_minute: default_longport_rate_limit(),
-                auto_fallback_to_mock: default_auto_fallback_to_mock(),
+                rate_limit_per_minute: stock_trading_content
+                    .map(|s| s.longport.rate_limit_per_minute)
+                    .unwrap_or_else(default_longport_rate_limit),
+                auto_fallback_to_mock: stock_trading_content
+                    .map(|s| s.longport.auto_fallback_to_mock)
+                    .unwrap_or_else(default_auto_fallback_to_mock),
             },
         }
+    }
+}
+
+/// Parse timeframe string with proper error handling (.rules compliance)
+fn parse_timeframe(timeframe_str: &str) -> TimeFrame {
+    match timeframe_str {
+        "1m" => TimeFrame::OneMinute,
+        "5m" => TimeFrame::FiveMinutes,
+        "15m" => TimeFrame::FifteenMinutes,
+        "30m" => TimeFrame::ThirtyMinutes,
+        "1h" => TimeFrame::OneHour,
+        "4h" => TimeFrame::FourHours,
+        "1D" => TimeFrame::OneDay,
+        "1W" => TimeFrame::OneWeek,
+        "1M" => TimeFrame::OneMonth,
+        _ => TimeFrame::OneDay, // Default fallback
     }
 }
 

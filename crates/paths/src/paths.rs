@@ -16,6 +16,10 @@ pub const EDITORCONFIG_NAME: &str = ".editorconfig";
 /// The directory will be created if it doesn't exist when set.
 static CUSTOM_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// An optional override for the extensions directory, set only by `set_extensions_dir`.
+/// When set, `extensions_dir()` returns this path instead of the default.
+static CUSTOM_EXTENSIONS_DIR: OnceLock<PathBuf> = OnceLock::new();
+
 /// The resolved data directory, combining custom override or platform defaults.
 /// This is set once and cached for subsequent calls.
 /// On macOS, this is `~/Library/Application Support/Zed`.
@@ -81,6 +85,16 @@ pub fn set_custom_data_dir(dir: &str) -> &'static PathBuf {
         // don't choke on the verbatim syntax.
         SanitizedPath::new(&canonicalized).as_path().to_path_buf()
     })
+}
+
+/// Overrides the extensions directory to a specific path.
+/// Must be called before `extensions_dir()` is first accessed.
+/// The directory will be created if it doesn't exist.
+pub fn set_extensions_dir(dir: PathBuf) {
+    CUSTOM_EXTENSIONS_DIR.get_or_init(|| {
+        std::fs::create_dir_all(&dir).expect("failed to create extensions directory");
+        dir
+    });
 }
 
 /// Returns the path to the configuration directory used by Zed.
@@ -284,7 +298,12 @@ pub fn debug_scenarios_file() -> &'static PathBuf {
 /// This is where installed extensions are stored.
 pub fn extensions_dir() -> &'static PathBuf {
     static EXTENSIONS_DIR: OnceLock<PathBuf> = OnceLock::new();
-    EXTENSIONS_DIR.get_or_init(|| data_dir().join("extensions"))
+    EXTENSIONS_DIR.get_or_init(|| {
+        if let Some(custom) = CUSTOM_EXTENSIONS_DIR.get() {
+            return custom.clone();
+        }
+        data_dir().join("extensions")
+    })
 }
 
 /// Returns the path to the extensions directory.

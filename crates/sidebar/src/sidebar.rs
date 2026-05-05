@@ -4415,7 +4415,6 @@ impl Sidebar {
 
     fn render_sidebar_header(
         &self,
-        no_open_projects: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -4447,41 +4446,39 @@ impl Sidebar {
             })
             .when(!right_window_controls, |this| this.pr_1p5())
             .gap_1()
-            .when(!no_open_projects, |this| {
-                this.border_b_1()
-                    .border_color(cx.theme().colors().border)
-                    .when(traffic_lights, |this| {
-                        this.child(Divider::vertical().color(ui::DividerColor::Border))
-                    })
-                    .child(
-                        div().ml_1().child(
-                            Icon::new(IconName::MagnifyingGlass)
-                                .size(IconSize::Small)
-                                .color(Color::Muted),
-                        ),
-                    )
-                    .child(self.render_filter_input(cx))
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .when(
-                                self.selection.is_some()
-                                    && !self.filter_editor.focus_handle(cx).is_focused(window),
-                                |this| this.child(KeyBinding::for_action(&FocusSidebarFilter, cx)),
-                            )
-                            .when(has_query, |this| {
-                                this.child(
-                                    IconButton::new("clear_filter", IconName::Close)
-                                        .icon_size(IconSize::Small)
-                                        .tooltip(Tooltip::text("Clear Search"))
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.reset_filter_editor_text(window, cx);
-                                            this.update_entries(cx);
-                                        })),
-                                )
-                            }),
-                    )
+            .border_b_1()
+            .border_color(cx.theme().colors().border)
+            .when(traffic_lights, |this| {
+                this.child(Divider::vertical().color(ui::DividerColor::Border))
             })
+            .child(
+                div().ml_1().child(
+                    Icon::new(IconName::MagnifyingGlass)
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                ),
+            )
+            .child(self.render_filter_input(cx))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .when(
+                        self.selection.is_some()
+                            && !self.filter_editor.focus_handle(cx).is_focused(window),
+                        |this| this.child(KeyBinding::for_action(&FocusSidebarFilter, cx)),
+                    )
+                    .when(has_query, |this| {
+                        this.child(
+                            IconButton::new("clear_filter", IconName::Close)
+                                .icon_size(IconSize::Small)
+                                .tooltip(Tooltip::text("Clear Search"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.reset_filter_editor_text(window, cx);
+                                    this.update_entries(cx);
+                                })),
+                        )
+                    }),
+            )
             .when(right_window_controls, |this| {
                 this.children(Self::render_right_window_controls(window, cx))
             })
@@ -4992,7 +4989,7 @@ impl Render for Sidebar {
             .border_color(color.border)
             .map(|this| match &self.view {
                 SidebarView::ThreadList => this
-                    .child(self.render_sidebar_header(no_open_projects, window, cx))
+                    .child(self.render_sidebar_header(window, cx))
                     .map(|this| {
                         if no_open_projects {
                             this.child(self.render_empty_state(cx))

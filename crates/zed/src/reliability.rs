@@ -313,11 +313,11 @@ async fn upload_minidump(
         form = form.text("sentry[user][id]", format!("installation-{}", id))
     }
 
-    ::telemetry::event!(
-        "Minidump Uploaded",
-        panic_message = panic_message,
-        crashed_version = metadata.init.zed_version.clone(),
-        commit_sha = metadata.init.commit_sha.clone(),
+    log::info!(
+        "Minidump uploaded: panic_message={:?}, version={}, sha={}",
+        panic_message,
+        metadata.init.zed_version,
+        metadata.init.commit_sha,
     );
 
     let gpu_count = metadata.gpus.len();
@@ -457,16 +457,12 @@ async fn upload_build_timings(_client: Arc<Client>) -> Result<()> {
             }
         };
 
-        telemetry::event!(
-            "Build Timing: Cargo Build",
-            started_at = timing.started_at.to_rfc3339(),
-            duration_ms = timing.duration_ms,
-            first_crate = timing.first_crate,
-            target = timing.target,
-            blocked_ms = timing.blocked_ms,
-            command = timing.command,
-            cpu_count = cpu_count,
-            ram_size_gb = ram_size_gb
+        log::info!(
+            "Build Timing: Cargo Build started_at={} duration_ms={} first_crate={} target={}",
+            timing.started_at.to_rfc3339(),
+            timing.duration_ms,
+            timing.first_crate,
+            timing.target,
         );
 
         if let Err(err) = smol::fs::remove_file(&path).await {

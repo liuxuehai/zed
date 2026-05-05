@@ -4,8 +4,6 @@ use agent_ui::ExternalSourcePrompt;
 use anyhow::{Context as _, Result, anyhow};
 use cli::{CliRequest, CliResponse, CliResponseSink};
 use cli::{IpcHandshake, ipc};
-use client::{ZedLink, parse_zed_link};
-use db::kvp::KeyValueStore;
 use editor::Editor;
 use fs::Fs;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -13,12 +11,8 @@ use futures::channel::{mpsc, oneshot};
 use futures::future;
 
 use futures::{FutureExt, StreamExt};
-use git_ui::{file_diff_view::FileDiffView, multi_diff_view::MultiDiffView};
 use gpui::{App, AsyncApp, Global, WindowHandle};
-use onboarding::FIRST_OPEN;
-use onboarding::show_onboarding_view;
-use recent_projects::{RemoteSettings, navigate_to_positions, open_remote_project};
-use remote::{RemoteConnectionOptions, WslConnectionOptions};
+use recent_projects::navigate_to_positions;
 use settings::Settings;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -39,9 +33,6 @@ pub struct OpenRequest {
     pub diff_paths: Vec<[String; 2]>,
     pub diff_all: bool,
     pub dev_container: bool,
-    pub open_channel_notes: Vec<(u64, Option<String>)>,
-    pub join_channel: Option<u64>,
-    pub remote_connection: Option<RemoteConnectionOptions>,
 }
 
 pub enum OpenRequestKind {
@@ -124,20 +115,6 @@ impl OpenRequest {
         this.diff_paths = request.diff_paths;
         this.diff_all = request.diff_all;
         this.dev_container = request.dev_container;
-        if let Some(wsl) = request.wsl {
-            let (user, distro_name) = if let Some((user, distro)) = wsl.split_once('@') {
-                if user.is_empty() {
-                    anyhow::bail!("user is empty in wsl argument");
-                }
-                (Some(user.to_string()), distro.to_string())
-            } else {
-                (None, wsl)
-            };
-            this.remote_connection = Some(RemoteConnectionOptions::Wsl(WslConnectionOptions {
-                distro_name,
-                user,
-            }));
-        }
 
         for url in request.urls {
             if let Some(server_name) = url.strip_prefix("zed-cli://") {
@@ -150,13 +127,6 @@ impl OpenRequest {
                 this.parse_file_path(file)
             } else if let Some(file) = url.strip_prefix("zed://file") {
                 this.parse_file_path(file)
-            } else if let Some(file) = url.strip_prefix("zed://ssh") {
-                let ssh_url = "ssh:/".to_string() + file;
-                this.parse_ssh_file_path(&ssh_url, cx)?
-            } else if let Some(extension_id) = url.strip_prefix("zed://extension/") {
-                this.kind = Some(OpenRequestKind::Extension {
-                    extension_id: extension_id.to_string(),
-                });
             } else if let Some(session_id_str) = url.strip_prefix("zed://agent/shared/") {
                 if uuid::Uuid::parse_str(session_id_str).is_ok() {
                     this.kind = Some(OpenRequestKind::SharedAgentThread {
@@ -181,20 +151,6 @@ impl OpenRequest {
                 this.parse_git_clone_url(clone_path)?
             } else if let Some(commit_path) = url.strip_prefix("zed://git/commit/") {
                 this.parse_git_commit_url(commit_path)?
-            } else if url.starts_with("ssh://") {
-                this.parse_ssh_file_path(&url, cx)?
-            } else if let Some(zed_link) = parse_zed_link(&url, cx) {
-                match zed_link {
-                    ZedLink::Channel { channel_id } => {
-                        this.join_channel = Some(channel_id);
-                    }
-                    ZedLink::ChannelNotes {
-                        channel_id,
-                        heading,
-                    } => {
-                        this.open_channel_notes.push((channel_id, heading));
-                    }
-                }
             } else {
                 log::error!("unhandled url: {}", url);
             }
@@ -263,35 +219,6 @@ impl OpenRequest {
         Ok(())
     }
 
-    fn parse_ssh_file_path(&mut self, file: &str, cx: &App) -> Result<()> {
-        let url = url::Url::parse(file)?;
-        let host = url
-            .host()
-            .with_context(|| format!("missing host in ssh url: {file}"))?
-            .to_string();
-        let username = Some(url.username().to_string()).filter(|s| !s.is_empty());
-        let port = url.port();
-        anyhow::ensure!(
-            self.open_paths.is_empty(),
-            "cannot open both local and ssh paths"
-        );
-        let mut connection_options =
-            RemoteSettings::get_global(cx).connection_options_for(host, port, username);
-        if let Some(password) = url.password() {
-            connection_options.password = Some(password.to_string());
-        }
-
-        let connection_options = RemoteConnectionOptions::Ssh(connection_options);
-        if let Some(ssh_connection) = &self.remote_connection {
-            anyhow::ensure!(
-                *ssh_connection == connection_options,
-                "cannot open multiple different remote connections"
-            );
-        }
-        self.remote_connection = Some(connection_options);
-        self.parse_file_path(url.path());
-        Ok(())
-    }
 }
 
 #[derive(Clone)]
@@ -303,7 +230,6 @@ pub struct RawOpenRequest {
     pub diff_paths: Vec<[String; 2]>,
     pub diff_all: bool,
     pub dev_container: bool,
-    pub wsl: Option<String>,
 }
 
 impl Global for OpenListener {}
@@ -403,30 +329,9 @@ pub async fn open_paths_with_positions(
         .await?;
 
     if diff_all && !diff_paths.is_empty() {
-        if let Ok(diff_view) = multi_workspace.update(cx, |multi_workspace, window, cx| {
-            multi_workspace.workspace().update(cx, |workspace, cx| {
-                MultiDiffView::open(diff_paths.to_vec(), workspace, window, cx)
-            })
-        }) {
-            if let Some(diff_view) = diff_view.await.log_err() {
-                items.push(Some(Ok(Box::new(diff_view))));
-            }
-        }
-    } else {
-        let workspace_weak = multi_workspace.read_with(cx, |multi_workspace, _cx| {
-            multi_workspace.workspace().downgrade()
-        })?;
-        for diff_pair in diff_paths {
-            let old_path = Path::new(&diff_pair[0]).canonicalize()?;
-            let new_path = Path::new(&diff_pair[1]).canonicalize()?;
-            if let Ok(diff_view) = multi_workspace.update(cx, |_multi_workspace, window, cx| {
-                FileDiffView::open(old_path, new_path, workspace_weak.clone(), window, cx)
-            }) {
-                if let Some(diff_view) = diff_view.await.log_err() {
-                    items.push(Some(Ok(Box::new(diff_view))))
-                }
-            }
-        }
+        log::warn!("diff_all mode not supported in this build (git_ui not available)");
+    } else if !diff_paths.is_empty() {
+        log::warn!("File diff view not supported in this build (git_ui not available)");
     }
 
     for (item, path) in items.iter_mut().zip(&paths) {
@@ -460,7 +365,7 @@ pub async fn handle_cli_connection(
                 diff_paths,
                 diff_all,
                 wait,
-                wsl,
+                wsl: _,
                 mut open_behavior,
                 env,
                 user_data_dir: _,
@@ -474,7 +379,6 @@ pub async fn handle_cli_connection(
                                 diff_paths,
                                 diff_all,
                                 dev_container,
-                                wsl,
                             },
                             cx,
                         ) {
@@ -665,24 +569,17 @@ async fn open_workspaces(
         };
 
     if grouped_locations.is_empty() {
-        // If we have no paths to open, show the welcome screen if this is the first launch
-        let kvp = cx.update(|cx| KeyValueStore::global(cx));
-        if matches!(kvp.read_kvp(FIRST_OPEN), Ok(None)) {
-            cx.update(|cx| show_onboarding_view(app_state, cx).detach());
-        }
-        // If not the first launch, show an empty window with empty editor
-        else {
-            cx.update(|cx| {
-                let open_options = OpenOptions {
-                    env,
-                    ..Default::default()
-                };
-                workspace::open_new(open_options, app_state, cx, |workspace, window, cx| {
-                    Editor::new_file(workspace, &Default::default(), window, cx)
-                })
-                .detach_and_log_err(cx);
-            });
-        }
+        // No paths to open — show an empty window with empty editor
+        cx.update(|cx| {
+            let open_options = OpenOptions {
+                env,
+                ..Default::default()
+            };
+            workspace::open_new(open_options, app_state, cx, |workspace, window, cx| {
+                Editor::new_file(workspace, &Default::default(), window, cx)
+            })
+            .detach_and_log_err(cx);
+        });
         return Ok(());
     }
     // If there are paths to open, open a workspace for each grouping of paths
@@ -747,26 +644,9 @@ async fn open_workspaces(
                     errored = true
                 }
             }
-            SerializedWorkspaceLocation::Remote(mut connection) => {
-                let app_state = app_state.clone();
-                if let RemoteConnectionOptions::Ssh(options) = &mut connection {
-                    cx.update(|cx| {
-                        RemoteSettings::get_global(cx)
-                            .fill_connection_options_from_settings(options)
-                    });
-                }
-                cx.spawn(async move |cx| {
-                    open_remote_project(
-                        connection,
-                        workspace_paths.paths().to_vec(),
-                        app_state,
-                        open_options,
-                        cx,
-                    )
-                    .await
-                    .log_err();
-                })
-                .detach();
+            SerializedWorkspaceLocation::Remote(_) => {
+                // Remote workspaces not supported in this build
+                log::info!("Skipping remote workspace (not supported)");
             }
         }
     }

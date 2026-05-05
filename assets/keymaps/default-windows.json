@@ -32,15 +32,8 @@
       "ctrl-0": ["zed::ResetBufferFontSize", { "persist": false }],
       "ctrl-alt-,": "zed::OpenSettingsFile",
       "ctrl-q": "zed::Quit",
-      "f4": "debugger::Start",
-      "shift-f5": "debugger::Stop",
-      "ctrl-shift-f5": "debugger::RerunSession",
-      "f6": "debugger::Pause",
-      "f10": "debugger::StepOver",
-      "shift-f11": "debugger::StepOut",
       "f11": "zed::ToggleFullScreen",
       "ctrl-shift-i": "edit_prediction::ToggleMenu",
-      "shift-alt-l": "lsp_tool::ToggleMenu",
       "ctrl-shift-alt-c": "editor::DisplayCursorNames",
       "ctrl-shift-alt-s": "workspace::ToggleWorktreeSecurity",
     },
@@ -180,14 +173,7 @@
       "ctrl-c": "markdown::Copy",
     },
   },
-  {
-    "context": "Editor && jupyter",
-    "use_key_equivalents": true,
-    "bindings": {
-      "ctrl-shift-enter": "repl::Run",
-      "ctrl-alt-enter": "repl::RunInPlace",
-    },
-  },
+
   {
     "context": "Editor && !agent_diff",
     "use_key_equivalents": true,
@@ -667,16 +653,12 @@
       "ctrl-e": "file_finder::Toggle",
       "f1": "command_palette::Toggle",
       "ctrl-shift-p": "command_palette::Toggle",
-      "ctrl-shift-m": "diagnostics::Deploy",
       "ctrl-shift-e": "project_panel::ToggleFocus",
       "ctrl-shift-b": "outline_panel::ToggleFocus",
-      "ctrl-shift-g": "git_panel::ToggleFocus",
-      "ctrl-shift-d": "debug_panel::ToggleFocus",
       "ctrl-shift-/": "agent::ToggleFocus",
       "ctrl-k s": "workspace::SaveAll",
       "ctrl-k n": "encoding_selector::Toggle",
       "ctrl-k m": "language_selector::Toggle",
-      "ctrl-m ctrl-m": "toolchain::AddToolchain",
       "escape": "workspace::Unfollow",
       "ctrl-k ctrl-left": "workspace::ActivatePaneLeft",
       "ctrl-k ctrl-right": "workspace::ActivatePaneRight",
@@ -697,25 +679,8 @@
       // "foo-bar": ["task::Spawn", { "task_name": "MyTask", "reveal_target": "dock" }]
       // or by tag:
       // "foo-bar": ["task::Spawn", { "task_tag": "MyTag" }],
-      "f5": "debugger::Rerun",
       "ctrl-f4": "workspace::CloseActiveDock",
       "ctrl-w": "workspace::CloseActiveDock",
-    },
-  },
-  {
-    "context": "Workspace && debugger_running",
-    "use_key_equivalents": true,
-    "bindings": {
-      // Unbind `f5` to avoid dispatching the `debugger::Rerun` as that is what `f5` is bound to in the `Workspace`
-      // context.
-      "f5": null,
-    },
-  },
-  {
-    "context": "Workspace && debugger_stopped",
-    "use_key_equivalents": true,
-    "bindings": {
-      "f5": "debugger::Continue",
     },
   },
   {
@@ -874,13 +839,7 @@
       "shift-alt-i": "dev::ToggleInspector",
     },
   },
-  {
-    "context": "!Terminal",
-    "use_key_equivalents": true,
-    "bindings": {
-      "ctrl-shift-c": "collab_panel::ToggleFocus",
-    },
-  },
+
   {
     "context": "!AcpThread > Editor && mode == full",
     "use_key_equivalents": true,
@@ -1073,71 +1032,8 @@
       "alt-shift-escape": "git::ToggleFillCommitEditor",
     },
   },
-  {
-    "context": "DebugPanel",
-    "use_key_equivalents": true,
-    "bindings": {
-      "ctrl-t": "debugger::ToggleThreadPicker",
-      "ctrl-i": "debugger::ToggleSessionPicker",
-      "shift-alt-escape": "debugger::ToggleExpandItem",
-    },
-  },
-  {
-    "context": "VariableList",
-    "use_key_equivalents": true,
-    "bindings": {
-      "left": "variable_list::CollapseSelectedEntry",
-      "right": "variable_list::ExpandSelectedEntry",
-      "enter": "variable_list::EditVariable",
-      "ctrl-c": "variable_list::CopyVariableValue",
-      "ctrl-alt-c": "variable_list::CopyVariableName",
-      "delete": "variable_list::RemoveWatch",
-      "backspace": "variable_list::RemoveWatch",
-      "alt-enter": "variable_list::AddWatch",
-    },
-  },
-  {
-    "context": "BreakpointList",
-    "use_key_equivalents": true,
-    "bindings": {
-      "space": "debugger::ToggleEnableBreakpoint",
-      "backspace": "debugger::UnsetBreakpoint",
-      "left": "debugger::PreviousBreakpointProperty",
-      "right": "debugger::NextBreakpointProperty",
-    },
-  },
-  {
-    "context": "CollabPanel && not_editing",
-    "use_key_equivalents": true,
-    "bindings": {
-      "ctrl-backspace": "collab_panel::Remove",
-      "space": "menu::Confirm",
-    },
-  },
-  {
-    "context": "CollabPanel",
-    "use_key_equivalents": true,
-    "bindings": {
-      "alt-up": "collab_panel::MoveChannelUp",
-      "alt-down": "collab_panel::MoveChannelDown",
-      "alt-enter": "collab_panel::OpenSelectedChannelNotes",
-      "shift-enter": "collab_panel::ToggleSelectedChannelFavorite",
-    },
-  },
-  {
-    "context": "(CollabPanel && editing) > Editor",
-    "use_key_equivalents": true,
-    "bindings": {
-      "space": "collab_panel::InsertSpace",
-    },
-  },
-  {
-    "context": "ChannelModal",
-    "use_key_equivalents": true,
-    "bindings": {
-      "tab": "channel_modal::ToggleMode",
-    },
-  },
+
+
   {
     "context": "Picker > Editor",
     "use_key_equivalents": true,
@@ -1149,20 +1045,7 @@
       "alt-enter": ["picker::ConfirmInput", { "secondary": false }],
     },
   },
-  {
-    "context": "ChannelModal > Picker > Editor",
-    "use_key_equivalents": true,
-    "bindings": {
-      "tab": "channel_modal::ToggleMode",
-    },
-  },
-  {
-    "context": "ToolchainSelector",
-    "use_key_equivalents": true,
-    "bindings": {
-      "ctrl-shift-a": "toolchain::AddToolchain",
-    },
-  },
+
   {
     "context": "FileFinder || (FileFinder > Picker > Editor)",
     "use_key_equivalents": true,
@@ -1297,21 +1180,7 @@
       "escape": "menu::Cancel",
     },
   },
-  {
-    "context": "Diagnostics",
-    "use_key_equivalents": true,
-    "bindings": {
-      "ctrl-r": "diagnostics::ToggleDiagnosticsRefresh",
-    },
-  },
-  {
-    "context": "DebugConsole > Editor",
-    "use_key_equivalents": true,
-    "bindings": {
-      "enter": "menu::Confirm",
-      "alt-enter": "console::WatchExpression",
-    },
-  },
+
   {
     "context": "RunModal",
     "use_key_equivalents": true,
@@ -1336,31 +1205,7 @@
       "ctrl-f": "buffer_search::Deploy",
     },
   },
-  {
-    "context": "KeymapEditor",
-    "use_key_equivalents": true,
-    "bindings": {
-      "ctrl-f": "search::FocusSearch",
-      "alt-f": "keymap_editor::ToggleKeystrokeSearch",
-      "alt-c": "keymap_editor::ToggleConflictFilter",
-      "enter": "keymap_editor::EditBinding",
-      "alt-enter": "keymap_editor::CreateBinding",
-      "ctrl-k": "keymap_editor::OpenCreateKeybindingModal",
-      "ctrl-c": "keymap_editor::CopyAction",
-      "ctrl-shift-c": "keymap_editor::CopyContext",
-      "ctrl-t": "keymap_editor::ShowMatchingKeybinds",
-      "ctrl-e": "zed::OpenKeymapFile",
-    },
-  },
-  {
-    "context": "KeystrokeInput",
-    "use_key_equivalents": true,
-    "bindings": {
-      "enter": "keystroke_input::StartRecording",
-      "escape escape escape": "keystroke_input::StopRecording",
-      "delete": "keystroke_input::ClearKeystrokes",
-    },
-  },
+
   {
     "context": "KeybindEditorModal",
     "use_key_equivalents": true,
@@ -1385,9 +1230,6 @@
       "ctrl-+": ["zed::IncreaseUiFontSize", { "persist": false }],
       "ctrl--": ["zed::DecreaseUiFontSize", { "persist": false }],
       "ctrl-0": ["zed::ResetUiFontSize", { "persist": false }],
-      "ctrl-enter": "onboarding::Finish",
-      "alt-shift-l": "onboarding::SignIn",
-      "shift-alt-a": "onboarding::OpenAccount",
     },
   },
   {
@@ -1492,15 +1334,7 @@
       "ctrl-shift-0": "image_viewer::FitToView",
     },
   },
-  {
-    "context": "RunModal",
-    "bindings": {
-      "alt-1": "new_process_modal::ActivateTaskTab",
-      "alt-2": "new_process_modal::ActivateDebugTab",
-      "alt-3": "new_process_modal::ActivateAttachTab",
-      "alt-4": "new_process_modal::ActivateLaunchTab",
-    },
-  },
+
   {
     "context": "GitPicker",
     "bindings": {
@@ -1551,20 +1385,6 @@
       "ctrl-shift-r": "notebook::RestartKernel",
       "ctrl-c": "notebook::InterruptKernel",
       "escape": "notebook::EnterCommandMode",
-    },
-  },
-  {
-    "context": "GitGraph",
-    "bindings": {
-      "tab": "git_graph::FocusNextTabStop",
-      "shift-tab": "git_graph::FocusPreviousTabStop",
-    },
-  },
-  {
-    "context": "GitGraphSearchBar > Editor",
-    "bindings": {
-      "tab": "git_graph::FocusNextTabStop",
-      "shift-tab": "git_graph::FocusPreviousTabStop",
     },
   },
 ]

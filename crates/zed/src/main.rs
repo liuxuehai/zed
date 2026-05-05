@@ -4,60 +4,51 @@
 mod reliability;
 mod zed;
 
-use agent::{SharedThread, ThreadStore};
-use agent_client_protocol::schema as acp;
 use agent_ui::AgentPanel;
 use anyhow::{Context as _, Result};
 use clap::Parser;
 use cli::FORCE_CLI_MODE_ENV_VAR_NAME;
-use client::{Client, ProxySettings, RefreshLlmTokenListener, UserStore, parse_zed_link};
-use collab_ui::channel_view::ChannelView;
+use client::{Client, ProxySettings, UserStore, parse_zed_link};
 use collections::HashMap;
 use crashes::InitCrashHandler;
 use db::kvp::{GlobalKeyValueStore, KeyValueStore};
 use editor::Editor;
 use extension::ExtensionHostProxy;
 use fs::{Fs, RealFs};
-use futures::{StreamExt, channel::oneshot, future};
+use futures::{StreamExt, channel::oneshot};
 use git::GitHostingProviderRegistry;
-use git_ui::clone::clone_and_open;
 use gpui::{
-    App, AppContext, Application, AsyncApp, Focusable as _, QuitMode, Task, UpdateGlobal as _,
+    App, AppContext, Application, AsyncApp, QuitMode, Task, UpdateGlobal as _,
     block_on,
 };
 use gpui_platform;
 
 use gpui_tokio::Tokio;
 use language::LanguageRegistry;
-use onboarding::{FIRST_OPEN, show_onboarding_view};
-use project_panel::ProjectPanel;
 use prompt_store::PromptBuilder;
-use remote::RemoteConnectionOptions;
 use reqwest_client::ReqwestClient;
 
 use assets::Assets;
+use call;
 use node_runtime::{NodeBinaryOptions, NodeRuntime};
 use parking_lot::Mutex;
 use project::{project_settings::ProjectSettings, trusted_worktrees};
-use proto;
-use recent_projects::{RemoteSettings, open_remote_project};
 use release_channel::{AppCommitSha, AppVersion, ReleaseChannel};
+use title_bar;
 use session::{AppSession, Session};
-use settings::{BaseKeymap, Settings, SettingsStore, watch_config_file};
+use settings::{Settings, SettingsStore, watch_config_file};
 use smol::future::poll_once;
 use std::{
-    cell::RefCell,
     env,
     io::{self, IsTerminal},
     path::{Path, PathBuf},
     process,
-    rc::Rc,
     sync::{Arc, LazyLock, OnceLock},
     time::Instant,
 };
 use theme::{ActiveTheme, GlobalTheme, ThemeRegistry};
 use theme_settings::load_user_theme;
-use util::{ResultExt, TryFutureExt, maybe};
+use util::ResultExt;
 use uuid::Uuid;
 use workspace::{
     AppState, MultiWorkspace, SerializedWorkspaceLocation, SessionWorkspace, Toast,
@@ -259,6 +250,33 @@ fn main() {
     // Set custom data directory.
     if let Some(dir) = &args.user_data_dir {
         paths::set_custom_data_dir(dir);
+    } else {
+        // Use a separate data directory to avoid conflicting with the official Zed installation.
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                let appdata = std::path::PathBuf::from(appdata);
+                let dev_dir = appdata.join("ZedDev");
+                paths::set_custom_data_dir(&dev_dir.to_string_lossy());
+
+                // Reuse the official Zed extensions directory so extensions don't need
+                // to be reinstalled separately.
+                let official_extensions = appdata.join("Zed").join("extensions");
+                if official_extensions.exists() {
+                    paths::set_extensions_dir(official_extensions);
+                } else {
+                    // Fall back to LocalAppData\Zed\extensions (official Zed on Windows
+                    // stores data in LocalAppData).
+                    if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+                        let official_extensions =
+                            std::path::PathBuf::from(localappdata).join("Zed").join("extensions");
+                        if official_extensions.exists() {
+                            paths::set_extensions_dir(official_extensions);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -549,36 +567,14 @@ fn main() {
 
         let node_runtime = NodeRuntime::new(client.http_client(), Some(shell_env_loaded_rx), rx);
 
-        debug_adapter_extension::init(extension_host_proxy.clone(), cx);
         languages::init(languages.clone(), fs.clone(), node_runtime.clone(), cx);
         let user_store = cx.new(|cx| UserStore::new(client.clone(), cx));
         let workspace_store = cx.new(|cx| WorkspaceStore::new(client.clone(), cx));
-
-        language_extension::init(
-            language_extension::LspAccess::ViaWorkspaces({
-                let workspace_store = workspace_store.clone();
-                Arc::new(move |cx: &mut App| {
-                    workspace_store.update(cx, |workspace_store, cx| {
-                        Ok(workspace_store
-                            .workspaces()
-                            .filter_map(|weak| weak.upgrade())
-                            .map(|workspace: gpui::Entity<workspace::Workspace>| {
-                                workspace.read(cx).project().read(cx).lsp_store()
-                            })
-                            .collect())
-                    })
-                })
-            }),
-            extension_host_proxy.clone(),
-            languages.clone(),
-        );
 
         Client::set_global(client.clone(), cx);
 
         zed::init(cx);
         project::Project::init(&client, cx);
-        debugger_ui::init(cx);
-        debugger_tools::init(cx);
         client::init(&client, cx);
         feature_flags::FeatureFlagStore::init(cx);
 
@@ -586,49 +582,8 @@ fn main() {
         let installation_id = cx.foreground_executor().block_on(installation_id).ok();
         let session = cx.foreground_executor().block_on(session);
 
-        let telemetry = client.telemetry();
-        telemetry.start(
-            system_id.as_ref().map(|id| id.to_string()),
-            installation_id.as_ref().map(|id| id.to_string()),
-            session.id().to_owned(),
-            cx,
-        );
-        cx.subscribe(&user_store, {
-            let telemetry = telemetry.clone();
-            move |_, evt: &client::user::Event, cx| match evt {
-                client::user::Event::PrivateUserInfoUpdated => {
-                    if let Some(crash_client) = cx.try_global::<CrashHandler>() {
-                        crashes::set_user_info(
-                            &crash_client.0,
-                            crashes::UserInfo {
-                                metrics_id: telemetry.metrics_id().map(|s| s.to_string()),
-                                is_staff: telemetry.is_staff(),
-                            },
-                        );
-                    }
-                }
-                _ => {}
-            }
-        })
-        .detach();
-
         let is_new_install = matches!(&installation_id, Some(IdType::New(_)));
 
-        // We should rename these in the future to `first app open`, `first app open for release channel`, and `app open`
-        if let (Some(system_id), Some(installation_id)) = (&system_id, &installation_id) {
-            match (&system_id, &installation_id) {
-                (IdType::New(_), IdType::New(_)) => {
-                    telemetry::event!("App First Opened");
-                    telemetry::event!("App First Opened For Release Channel");
-                }
-                (IdType::Existing(_), IdType::New(_)) => {
-                    telemetry::event!("App First Opened For Release Channel");
-                }
-                (_, IdType::Existing(_)) => {
-                    telemetry::event!("App Opened");
-                }
-            }
-        }
         let app_session = cx.new(|cx| AppSession::new(session, cx));
 
         let app_state = Arc::new(AppState {
@@ -644,7 +599,6 @@ fn main() {
         AppState::set_global(app_state.clone(), cx);
 
         auto_update::init(client.clone(), cx);
-        dap_adapters::init(cx);
         auto_update_ui::init(cx);
         reliability::init(client.clone(), cx);
         extension_host::init(
@@ -663,34 +617,16 @@ fn main() {
             cx.background_executor().clone(),
         );
         command_palette::init(cx);
-        let copilot_chat_configuration = copilot_chat::CopilotChatConfiguration {
-            enterprise_uri: language::language_settings::all_language_settings(None, cx)
-                .edit_predictions
-                .copilot
-                .enterprise_uri
-                .clone(),
-        };
-        copilot_chat::init(
-            app_state.fs.clone(),
-            app_state.client.http_client(),
-            copilot_chat_configuration,
-            cx,
-        );
 
-        copilot_ui::init(&app_state, cx);
         language_model::init(cx);
-        RefreshLlmTokenListener::register(
+        client::RefreshLlmTokenListener::register(
             app_state.client.clone(),
             app_state.user_store.clone(),
             cx,
         );
         language_models::init(app_state.user_store.clone(), app_state.client.clone(), cx);
         acp_tools::init(cx);
-        zed::telemetry_log::init(cx);
         zed::remote_debug::init(cx);
-        edit_prediction_ui::init(cx);
-        web_search::init(cx);
-        web_search_providers::init(app_state.client.clone(), app_state.user_store.clone(), cx);
         snippet_provider::init(cx);
         edit_prediction_registry::init(app_state.client.clone(), app_state.user_store.clone(), cx);
         let prompt_builder = PromptBuilder::load(app_state.fs.clone(), stdout_is_a_pty(), cx);
@@ -708,31 +644,23 @@ fn main() {
             cx,
         );
 
-        repl::init(app_state.fs.clone(), cx);
-        recent_projects::init(cx);
-        dev_container::init(cx);
-
         load_embedded_fonts(cx);
 
         editor::init(cx);
         image_viewer::init(cx);
-        repl::notebook::init(cx);
-        diagnostics::init(cx);
 
         audio::init(cx);
         workspace::init(app_state.clone(), cx);
+        call::init(app_state.client.clone(), app_state.user_store.clone(), cx);
+        title_bar::init(cx);
         ui_prompt::init(cx);
 
         go_to_line::init(cx);
         file_finder::init(cx);
         tab_switcher::init(cx);
         outline::init(cx);
-        project_symbols::init(cx);
         project_panel::init(cx);
         outline_panel::init(cx);
-        tasks_ui::init(cx);
-        snippets_ui::init(cx);
-        channel::init(&app_state.client.clone(), app_state.user_store.clone(), cx);
         search::init(cx);
         cx.set_global(workspace::PaneSearchBarCallbacks {
             setup_search_bar: |languages, toolbar, window, cx| {
@@ -743,40 +671,16 @@ fn main() {
             },
             wrap_div_with_search_actions: search::buffer_search::register_pane_search_actions,
         });
-        vim::init(cx);
         terminal_view::init(cx);
-        journal::init(app_state.clone(), cx);
         encoding_selector::init(cx);
         language_selector::init(cx);
         line_ending_selector::init(cx);
-        toolchain_selector::init(cx);
         theme_selector::init(cx);
-        settings_profile_selector::init(cx);
-        language_tools::init(cx);
-        call::init(app_state.client.clone(), app_state.user_store.clone(), cx);
-        notifications::init(app_state.client.clone(), app_state.user_store.clone(), cx);
-        collab_ui::init(&app_state, cx);
-        git_ui::init(cx);
-        git_graph::init(cx);
-        feedback::init(cx);
         markdown_preview::init(cx);
-        csv_preview::init(cx);
         svg_preview::init(cx);
-        onboarding::init(cx);
         settings_ui::init(cx);
-        keymap_editor::init(cx);
-        extensions_ui::init(cx);
-        edit_prediction::init(cx);
-        inspector_ui::init(app_state.clone(), cx);
-        json_schema_store::init(cx);
-        miniprofiler_ui::init(*STARTUP_TIME.get().unwrap(), cx);
-        which_key::init(cx);
-        #[cfg(target_os = "windows")]
-        etw_tracing::init(cx);
 
         cx.observe_global::<SettingsStore>({
-            let http = app_state.client.http_client();
-            let client = app_state.client.clone();
             move |cx| {
                 for &mut window in cx.windows().iter_mut() {
                     let background_appearance = cx.theme().window_background_appearance();
@@ -798,17 +702,10 @@ fn main() {
                         }
                     },
                 );
-
-                let new_host = &client::ClientSettings::get_global(cx).server_url;
-                if &http.base_url() != new_host {
-                    http.set_base_url(new_host);
-                    if client.status().borrow().is_connected() {
-                        client.reconnect(&cx.to_async());
-                    }
-                }
             }
         })
         .detach();
+
         app_state.languages.set_theme(cx.theme().clone());
         cx.observe_global::<GlobalTheme>({
             let languages = app_state.languages.clone();
@@ -817,17 +714,6 @@ fn main() {
             }
         })
         .detach();
-        telemetry::event!(
-            "Settings Changed",
-            setting = "theme",
-            value = cx.theme().name.to_string()
-        );
-        telemetry::event!(
-            "Settings Changed",
-            setting = "keymap",
-            value = BaseKeymap::get_global(cx).to_string()
-        );
-        telemetry.flush_events().detach();
 
         let fs = app_state.fs.clone();
         load_user_themes_in_background(fs.clone(), cx);
@@ -860,12 +746,6 @@ fn main() {
 
         cx.activate(true);
 
-        cx.spawn({
-            let client = app_state.client.clone();
-            async move |cx| authenticate(client, cx).await
-        })
-        .detach_and_log_err(cx);
-
         let urls: Vec<_> = args
             .paths_or_urls
             .iter()
@@ -884,18 +764,13 @@ fn main() {
             .map(|chunk| [chunk[0].clone(), chunk[1].clone()])
             .collect();
 
-        #[cfg(target_os = "windows")]
-        let wsl = args.wsl;
-        #[cfg(not(target_os = "windows"))]
-        let wsl = None;
-
         if !urls.is_empty() || !diff_paths.is_empty() {
             open_listener.open(RawOpenRequest {
                 urls,
                 diff_paths,
-                wsl,
                 diff_all: diff_all_mode,
                 dev_container: args.dev_container,
+                ..Default::default()
             })
         }
 
@@ -943,8 +818,6 @@ fn main() {
 
         let app_state = app_state.clone();
 
-        component_preview::init(app_state.clone(), cx);
-
         cx.spawn(async move |cx| {
             while let Some(urls) = open_rx.next().await {
                 cx.update(|cx| {
@@ -964,22 +837,6 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
             OpenRequestKind::CliConnection(connection) => {
                 cx.spawn(async move |cx| handle_cli_connection(connection, app_state, cx).await)
                     .detach();
-            }
-            OpenRequestKind::Extension { extension_id } => {
-                cx.spawn(async move |cx| {
-                    let workspace =
-                        workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
-                    workspace.update(cx, |_, window, cx| {
-                        window.dispatch_action(
-                            Box::new(zed_actions::Extensions {
-                                category_filter: None,
-                                id: Some(extension_id),
-                            }),
-                            cx,
-                        );
-                    })
-                })
-                .detach_and_log_err(cx);
             }
             OpenRequestKind::AgentPanel {
                 external_source_prompt,
@@ -1004,270 +861,18 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 })
                 .detach_and_log_err(cx);
             }
-            OpenRequestKind::SharedAgentThread { session_id } => {
-                cx.spawn(async move |cx| {
-                    let multi_workspace =
-                        workspace::get_any_active_multi_workspace(app_state.clone(), cx.clone())
-                            .await?;
-
-                    let workspace =
-                        multi_workspace.read_with(cx, |mw, _| mw.workspace().clone())?;
-
-                    let (client, thread_store) =
-                        multi_workspace.update(cx, |_, _window, cx| {
-                            workspace.update(cx, |workspace, cx| {
-                                let client = workspace.project().read(cx).client();
-                                let thread_store: Option<gpui::Entity<ThreadStore>> = workspace
-                                    .panel::<AgentPanel>(cx)
-                                    .map(|panel| panel.read(cx).thread_store().clone());
-                                anyhow::Ok((client, thread_store))
-                            })
-                        })??;
-
-                    let Some(thread_store): Option<gpui::Entity<ThreadStore>> = thread_store else {
-                        anyhow::bail!("Agent panel not available");
-                    };
-
-                    let response = client
-                        .request(proto::GetSharedAgentThread {
-                            session_id: session_id.clone(),
-                        })
-                        .await
-                        .context("Failed to fetch shared thread")?;
-
-                    let shared_thread = SharedThread::from_bytes(&response.thread_data)?;
-                    let db_thread = shared_thread.to_db_thread();
-                    let session_id = acp::SessionId::new(session_id);
-
-                    let save_session_id = session_id.clone();
-
-                    thread_store
-                        .update(&mut cx.clone(), |store, cx| {
-                            store.save_thread(
-                                save_session_id.clone(),
-                                db_thread,
-                                Default::default(),
-                                cx,
-                            )
-                        })
-                        .await?;
-
-                    let sharer_username = response.sharer_username.clone();
-
-                    multi_workspace.update(cx, |_, window, cx| {
-                        workspace.update(cx, |workspace, cx| {
-                            if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
-                                panel.update(cx, |panel, cx| {
-                                    panel.open_thread(
-                                        session_id,
-                                        None,
-                                        Some(format!("🔗 {}", response.title).into()),
-                                        window,
-                                        cx,
-                                    );
-                                });
-                                panel.focus_handle(cx).focus(window, cx);
-                            }
-
-                            struct ImportedThreadToast;
-                            workspace.show_toast(
-                                Toast::new(
-                                    NotificationId::unique::<ImportedThreadToast>(),
-                                    format!("Imported shared thread from {}", sharer_username),
-                                )
-                                .autohide(),
-                                cx,
-                            );
-                        });
-                    })?;
-
-                    anyhow::Ok(())
-                })
-                .detach_and_log_err(cx);
-            }
             OpenRequestKind::DockMenuAction { index } => {
                 cx.perform_dock_menu_action(index);
             }
-            OpenRequestKind::BuiltinJsonSchema { schema_path } => {
-                workspace::with_active_or_new_workspace(cx, |_workspace, window, cx| {
-                    cx.spawn_in(window, async move |workspace, cx| {
-                        let res = async move {
-                            let json = app_state.languages.language_for_name("JSONC").await.ok();
-                            let lsp_store = workspace.update(cx, |workspace, cx| {
-                                workspace
-                                    .project()
-                                    .update(cx, |project, _| project.lsp_store())
-                            })?;
-                            let uri = format!("zed://schemas/{}", schema_path);
-                            let json_schema_content =
-                                json_schema_store::handle_schema_request(lsp_store, uri, cx)
-                                    .await?;
-                            let json_schema_value: serde_json::Value =
-                                serde_json::from_str(&json_schema_content)
-                                    .context("Failed to parse JSON Schema")?;
-                            let json_schema_content =
-                                serde_json::to_string_pretty(&json_schema_value)
-                                    .context("Failed to serialize JSON Schema as JSON")?;
-                            let buffer_task = workspace.update(cx, |workspace, cx| {
-                                workspace.project().update(cx, |project, cx| {
-                                    project.create_buffer(json, false, cx)
-                                })
-                            })?;
-
-                            let buffer = buffer_task.await?;
-
-                            workspace.update_in(cx, |workspace, window, cx| {
-                                buffer.update(cx, |buffer, cx| {
-                                    buffer.edit([(0..0, json_schema_content)], None, cx);
-                                    buffer.edit(
-                                        [(0..0, format!("// {} JSON Schema\n", schema_path))],
-                                        None,
-                                        cx,
-                                    );
-                                });
-
-                                workspace.add_item_to_active_pane(
-                                    Box::new(cx.new(|cx| {
-                                        let mut editor =
-                                            editor::Editor::for_buffer(buffer, None, window, cx);
-                                        editor.set_read_only(true);
-                                        editor
-                                    })),
-                                    None,
-                                    true,
-                                    window,
-                                    cx,
-                                );
-                            })
-                        }
-                        .await;
-                        res.context("Failed to open builtin JSON Schema").log_err();
-                    })
-                    .detach();
-                });
-            }
-            OpenRequestKind::Setting { setting_path } => {
-                // zed://settings/languages/$(language)/tab_size  - DONT SUPPORT
-                // zed://settings/languages/Rust/tab_size  - SUPPORT
-                // languages.$(language).tab_size
-                // [ languages $(language) tab_size]
-                cx.spawn(async move |cx| {
-                    let workspace =
-                        workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
-
-                    workspace.update(cx, |_, window, cx| match setting_path {
-                        None => window.dispatch_action(Box::new(zed_actions::OpenSettings), cx),
-                        Some(setting_path) => window.dispatch_action(
-                            Box::new(zed_actions::OpenSettingsAt { path: setting_path }),
-                            cx,
-                        ),
-                    })
-                })
-                .detach_and_log_err(cx);
-            }
-            OpenRequestKind::GitClone { repo_url } => {
-                workspace::with_active_or_new_workspace(cx, |_workspace, window, cx| {
-                    if window.is_window_active() {
-                        clone_and_open(
-                            repo_url,
-                            cx.weak_entity(),
-                            window,
-                            cx,
-                            Arc::new(|workspace: &mut workspace::Workspace, window, cx| {
-                                workspace.focus_panel::<ProjectPanel>(window, cx);
-                            }),
-                        );
-                        return;
-                    }
-
-                    let subscription = Rc::new(RefCell::new(None));
-                    subscription.replace(Some(cx.observe_in(&cx.entity(), window, {
-                        let subscription = subscription.clone();
-                        let repo_url = repo_url;
-                        move |_, workspace_entity, window, cx| {
-                            if window.is_window_active() && subscription.take().is_some() {
-                                clone_and_open(
-                                    repo_url.clone(),
-                                    workspace_entity.downgrade(),
-                                    window,
-                                    cx,
-                                    Arc::new(|workspace: &mut workspace::Workspace, window, cx| {
-                                        workspace.focus_panel::<ProjectPanel>(window, cx);
-                                    }),
-                                );
-                            }
-                        }
-                    })));
-                });
-            }
-            OpenRequestKind::GitCommit { sha } => {
-                cx.spawn(async move |cx| {
-                    let paths_with_position =
-                        derive_paths_with_position(app_state.fs.as_ref(), request.open_paths).await;
-                    let (workspace, _results) = open_paths_with_positions(
-                        &paths_with_position,
-                        &[],
-                        false,
-                        app_state,
-                        workspace::OpenOptions::default(),
-                        cx,
-                    )
-                    .await?;
-
-                    workspace
-                        .update(cx, |multi_workspace, window, cx| {
-                            multi_workspace
-                                .workspace()
-                                .clone()
-                                .update(cx, |workspace, cx| {
-                                    let Some(repo) =
-                                        workspace.project().read(cx).active_repository(cx)
-                                    else {
-                                        log::error!("no active repository found for commit view");
-                                        return Err(anyhow::anyhow!("no active repository found"));
-                                    };
-
-                                    git_ui::commit_view::CommitView::open(
-                                        sha,
-                                        repo.downgrade(),
-                                        workspace.weak_handle(),
-                                        None,
-                                        None,
-                                        window,
-                                        cx,
-                                    );
-                                    Ok(())
-                                })
-                        })
-                        .log_err();
-
-                    anyhow::Ok(())
-                })
-                .detach_and_log_err(cx);
+            _ => {
+                // Other request kinds not supported in this build
             }
         }
 
         return;
     }
 
-    if let Some(connection_options) = request.remote_connection {
-        cx.spawn(async move |cx| {
-            let paths: Vec<PathBuf> = request.open_paths.into_iter().map(PathBuf::from).collect();
-            open_remote_project(
-                connection_options,
-                paths,
-                app_state,
-                workspace::OpenOptions::default(),
-                cx,
-            )
-            .await
-        })
-        .detach_and_log_err(cx);
-        return;
-    }
-
     let mut task = None;
-    let dev_container = request.dev_container;
     if !request.open_paths.is_empty() || !request.diff_paths.is_empty() {
         let app_state = app_state.clone();
         task = Some(cx.spawn(async move |cx| {
@@ -1278,10 +883,7 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 &request.diff_paths,
                 request.diff_all,
                 app_state,
-                workspace::OpenOptions {
-                    open_in_dev_container: dev_container,
-                    ..Default::default()
-                },
+                workspace::OpenOptions::default(),
                 cx,
             )
             .await?;
@@ -1294,58 +896,7 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
         }));
     }
 
-    if !request.open_channel_notes.is_empty() || request.join_channel.is_some() {
-        cx.spawn(async move |cx| {
-            let result = maybe!(async {
-                if let Some(task) = task {
-                    task.await?;
-                }
-                let client = app_state.client.clone();
-                // we continue even if authentication fails as join_channel/ open channel notes will
-                // show a visible error message.
-                authenticate(client, cx).await.log_err();
-
-                if let Some(channel_id) = request.join_channel {
-                    cx.update(|cx| {
-                        workspace::join_channel(
-                            client::ChannelId(channel_id),
-                            app_state.clone(),
-                            None,
-                            None,
-                            cx,
-                        )
-                    })
-                    .await?;
-                }
-
-                let workspace_window =
-                    workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
-
-                let workspace = workspace_window.read_with(cx, |mw, _| mw.workspace().clone())?;
-
-                let mut promises = Vec::new();
-                for (channel_id, heading) in request.open_channel_notes {
-                    promises.push(cx.update_window(workspace_window.into(), |_, window, cx| {
-                        ChannelView::open(
-                            client::ChannelId(channel_id),
-                            heading,
-                            workspace.clone(),
-                            window,
-                            cx,
-                        )
-                        .log_err()
-                    })?)
-                }
-                future::join_all(promises).await;
-                anyhow::Ok(())
-            })
-            .await;
-            if let Err(err) = result {
-                fail_to_open_window_async(err, cx);
-            }
-        })
-        .detach()
-    } else if let Some(task) = task {
+    if let Some(task) = task {
         cx.spawn(async move |cx| {
             if let Err(err) = task.await {
                 fail_to_open_window_async(err, cx);
@@ -1354,21 +905,6 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
         .detach();
     }
 }
-
-async fn authenticate(client: Arc<Client>, cx: &AsyncApp) -> Result<()> {
-    if stdout_is_a_pty() {
-        if client::IMPERSONATE_LOGIN.is_some() {
-            client.sign_in_with_optional_connect(false, cx).await?;
-        } else if client.has_credentials(cx).await {
-            client.sign_in_with_optional_connect(true, cx).await?;
-        }
-    } else if client.has_credentials(cx).await {
-        client.sign_in_with_optional_connect(true, cx).await?;
-    }
-
-    Ok(())
-}
-
 async fn system_id() -> Result<IdType> {
     let key_name = "system_id".to_string();
     let db = GlobalKeyValueStore::global();
@@ -1410,7 +946,6 @@ pub(crate) async fn restore_or_create_workspace(
     app_state: Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> Result<()> {
-    let kvp = cx.update(|cx| KeyValueStore::global(cx));
     if let Some(multi_workspaces) = restorable_workspaces(cx, &app_state).await {
         let mut error_count = 0;
         for multi_workspace in multi_workspaces {
@@ -1420,42 +955,10 @@ pub(crate) async fn restore_or_create_workspace(
                         .await
                         .map(|_| ())
                 }
-                SerializedWorkspaceLocation::Remote(connection_options) => {
-                    let mut connection_options = connection_options.clone();
-                    if let RemoteConnectionOptions::Ssh(options) = &mut connection_options {
-                        cx.update(|cx| {
-                            RemoteSettings::get_global(cx)
-                                .fill_connection_options_from_settings(options)
-                        });
-                    }
-
-                    let paths = multi_workspace
-                        .active_workspace
-                        .paths
-                        .paths()
-                        .iter()
-                        .map(PathBuf::from)
-                        .collect::<Vec<_>>();
-                    let state = multi_workspace.state.clone();
-                    async {
-                        let window = open_remote_project(
-                            connection_options,
-                            paths,
-                            app_state.clone(),
-                            workspace::OpenOptions::default(),
-                            cx,
-                        )
-                        .await?;
-                        workspace::apply_restored_multiworkspace_state(
-                            window,
-                            &state,
-                            app_state.fs.clone(),
-                            cx,
-                        )
-                        .await;
-                        Ok::<(), anyhow::Error>(())
-                    }
-                    .await
+                SerializedWorkspaceLocation::Remote(_) => {
+                    // Remote workspaces not supported in this build
+                    log::info!("Skipping remote workspace restoration (not supported)");
+                    Ok(())
                 }
             };
 
@@ -1475,7 +978,6 @@ pub(crate) async fn restore_or_create_workspace(
                 )
             };
 
-            // Try to find an active workspace to show the toast
             let toast_shown = cx.update(|cx| {
                 if let Some(window) = cx.active_window()
                     && let Some(multi_workspace) = window.downcast::<MultiWorkspace>()
@@ -1495,8 +997,6 @@ pub(crate) async fn restore_or_create_workspace(
                 false
             });
 
-            // If we couldn't show a toast (no windows opened successfully),
-            // open a fallback empty workspace and show the error there
             if !toast_shown {
                 log::error!("All workspace restorations failed. Opening fallback empty workspace.");
                 cx.update(|cx| {
@@ -1516,10 +1016,6 @@ pub(crate) async fn restore_or_create_workspace(
             }
         }
 
-        // If the user cancelled a failed remote connection at startup,
-        // open_remote_project returns Ok but removes the window, so error_count
-        // stays 0 and the toast fallback above does not trigger. Without this
-        // check, Zed would exit silently.
         if cx.update(|cx| cx.windows().is_empty()) {
             cx.update(|cx| {
                 workspace::open_new(
@@ -1527,21 +1023,12 @@ pub(crate) async fn restore_or_create_workspace(
                     app_state.clone(),
                     cx,
                     |workspace, window, cx| {
-                        let restore_on_startup =
-                            WorkspaceSettings::get_global(cx).restore_on_startup;
-                        match restore_on_startup {
-                            workspace::RestoreOnStartupBehavior::Launchpad => {}
-                            _ => {
-                                Editor::new_file(workspace, &Default::default(), window, cx);
-                            }
-                        }
+                        Editor::new_file(workspace, &Default::default(), window, cx);
                     },
                 )
             })
             .await?;
         }
-    } else if matches!(kvp.read_kvp(FIRST_OPEN), Ok(None)) {
-        cx.update(|cx| show_onboarding_view(app_state, cx)).await?;
     } else {
         cx.update(|cx| {
             workspace::open_new(
@@ -1549,13 +1036,7 @@ pub(crate) async fn restore_or_create_workspace(
                 app_state,
                 cx,
                 |workspace, window, cx| {
-                    let restore_on_startup = WorkspaceSettings::get_global(cx).restore_on_startup;
-                    match restore_on_startup {
-                        workspace::RestoreOnStartupBehavior::Launchpad => {}
-                        _ => {
-                            Editor::new_file(workspace, &Default::default(), window, cx);
-                        }
-                    }
+                    Editor::new_file(workspace, &Default::default(), window, cx);
                 },
             )
         })

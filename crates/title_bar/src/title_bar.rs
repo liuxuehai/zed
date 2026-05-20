@@ -29,7 +29,7 @@ use cloud_api_types::Plan;
 use gpui::{
     Action, Anchor, Animation, AnimationExt, AnyElement, App, Context, Element, Entity, Focusable,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, actions, div,
+    StatefulInteractiveElement, Styled, Subscription, TaskExt, WeakEntity, Window, actions, div,
     pulsating_between,
 };
 use onboarding_banner::OnboardingBanner;
@@ -51,7 +51,8 @@ use ui::{
 use update_version::UpdateVersion;
 use util::ResultExt;
 use workspace::{
-    MultiWorkspace, ToggleWorktreeSecurity, Workspace, notifications::NotifyResultExt,
+    MultiWorkspace, ToggleWorktreeSecurity, Workspace,
+    notifications::{NotifyResultExt, NotifyTaskExt as _},
 };
 
 use zed_actions::OpenRemote;
@@ -456,6 +457,8 @@ impl TitleBar {
             titlebar
         });
 
+        let banner = None;
+
         let mut this = Self {
             platform_titlebar,
             application_menu,
@@ -465,7 +468,7 @@ impl TitleBar {
             user_store,
             client,
             _subscriptions: subscriptions,
-            banner: None,
+            banner,
             update_version,
             screen_share_popover_handle: PopoverMenuHandle::default(),
             _diagnostics_subscription: None,
@@ -625,13 +628,8 @@ impl TitleBar {
     }
 
     pub fn render_restricted_mode(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let has_restricted_worktrees = TrustedWorktrees::try_get_global(cx)
-            .map(|trusted_worktrees| {
-                trusted_worktrees
-                    .read(cx)
-                    .has_restricted_worktrees(&self.project.read(cx).worktree_store(), cx)
-            })
-            .unwrap_or(false);
+        let has_restricted_worktrees =
+            TrustedWorktrees::has_restricted_worktrees(&self.project.read(cx).worktree_store(), cx);
         if !has_restricted_worktrees {
             return None;
         }
@@ -692,7 +690,7 @@ impl TitleBar {
             .user_store
             .read(cx)
             .participant_indices()
-            .get(&host_user.id)?;
+            .get(&host_user.legacy_id)?;
 
         Some(
             Button::new("project_owner_trigger", host_user.github_login.clone())
@@ -1069,13 +1067,12 @@ impl TitleBar {
     }
 
     fn observe_diagnostics(&mut self, cx: &mut Context<Self>) {
-        let diagnostics = ActiveCall::try_global(cx)
-            .and_then(|active_call| {
-                active_call
-                    .read(cx)
-                    .room()
-                    .and_then(|room| room.read(cx).diagnostics().cloned())
-            });
+        let diagnostics = ActiveCall::try_global(cx).and_then(|active_call| {
+            active_call
+                .read(cx)
+                .room()
+                .and_then(|room| room.read(cx).diagnostics().cloned())
+        });
 
         if let Some(diagnostics) = diagnostics {
             self._diagnostics_subscription = Some(cx.observe(&diagnostics, |_, _, cx| cx.notify()));
@@ -1175,6 +1172,7 @@ impl TitleBar {
         let show_update_button = self.update_version.read(cx).show_update_in_menu_bar();
 
         let user_store = self.user_store.clone();
+        let workspace = self.workspace.clone();
         let user_store_read = user_store.read(cx);
         let user = user_store_read.current_user();
 
@@ -1241,6 +1239,7 @@ impl TitleBar {
                 let current_organization = current_organization.clone();
                 let organizations = organizations.clone();
                 let user_store = user_store.clone();
+                let workspace = workspace.clone();
 
                 let ai_enabled = !project::DisableAiSettings::get_global(cx).disable_ai;
                 let current_layout = AgentSettings::get_layout(cx);
@@ -1332,11 +1331,13 @@ impl TitleBar {
                                 {
                                     let user_store = user_store.clone();
                                     let organization = organization.clone();
-                                    move |_window, cx| {
-                                        user_store.update(cx, |user_store, cx| {
+                                    let workspace = workspace.clone();
+                                    move |window, cx| {
+                                        let task = user_store.update(cx, |user_store, cx| {
                                             user_store
-                                                .set_current_organization(organization.clone(), cx);
+                                                .set_current_organization(organization.clone(), cx)
                                         });
+                                        task.detach_and_notify_err(workspace.clone(), window, cx);
                                     }
                                 },
                             );

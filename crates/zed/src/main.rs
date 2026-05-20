@@ -18,8 +18,7 @@ use fs::{Fs, RealFs};
 use futures::{StreamExt, channel::oneshot};
 use git::GitHostingProviderRegistry;
 use gpui::{
-    App, AppContext, Application, AsyncApp, QuitMode, Task, UpdateGlobal as _,
-    block_on,
+    App, AppContext, Application, AsyncApp, QuitMode, Task, TaskExt, UpdateGlobal as _, block_on,
 };
 use gpui_platform;
 
@@ -34,7 +33,6 @@ use node_runtime::{NodeBinaryOptions, NodeRuntime};
 use parking_lot::Mutex;
 use project::{project_settings::ProjectSettings, trusted_worktrees};
 use release_channel::{AppCommitSha, AppVersion, ReleaseChannel};
-use title_bar;
 use session::{AppSession, Session};
 use settings::{Settings, SettingsStore, watch_config_file};
 use smol::future::poll_once;
@@ -48,6 +46,7 @@ use std::{
 };
 use theme::{ActiveTheme, GlobalTheme, ThemeRegistry};
 use theme_settings::load_user_theme;
+use title_bar;
 use util::ResultExt;
 use uuid::Uuid;
 use workspace::{
@@ -268,8 +267,9 @@ fn main() {
                     // Fall back to LocalAppData\Zed\extensions (official Zed on Windows
                     // stores data in LocalAppData).
                     if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
-                        let official_extensions =
-                            std::path::PathBuf::from(localappdata).join("Zed").join("extensions");
+                        let official_extensions = std::path::PathBuf::from(localappdata)
+                            .join("Zed")
+                            .join("extensions");
                         if official_extensions.exists() {
                             paths::set_extensions_dir(official_extensions);
                         }

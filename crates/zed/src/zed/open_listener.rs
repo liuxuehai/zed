@@ -11,7 +11,7 @@ use futures::channel::{mpsc, oneshot};
 use futures::future;
 
 use futures::{FutureExt, StreamExt};
-use gpui::{App, AsyncApp, Global, WindowHandle};
+use gpui::{App, AsyncApp, Global, TaskExt, WindowHandle};
 use recent_projects::navigate_to_positions;
 use settings::Settings;
 use std::path::{Path, PathBuf};
@@ -218,7 +218,6 @@ impl OpenRequest {
 
         Ok(())
     }
-
 }
 
 #[derive(Clone)]
@@ -370,6 +369,7 @@ pub async fn handle_cli_connection(
                 env,
                 user_data_dir: _,
                 dev_container,
+                ..
             } => {
                 if !urls.is_empty() {
                     cx.update(|cx| {

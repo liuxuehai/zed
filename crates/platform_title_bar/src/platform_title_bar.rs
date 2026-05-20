@@ -288,7 +288,8 @@ impl Render for PlatformTitleBar {
                     .items_center()
                     .justify_between()
                     .overflow_x_hidden()
-                    .w_full()
+                    .flex_1()
+                    .min_w_0()
                     .children(children),
             )
             .when(!window.is_fullscreen(), |title_bar| {
